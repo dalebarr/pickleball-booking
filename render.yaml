@@ -1,0 +1,19 @@
+# One-click deploy on Render (https://render.com): New > Blueprint > pick this repository.
+# Render's free web services have no permanent disk, so bookings are kept in a free
+# PostgreSQL database instead: paste its connection string into DATABASE_URL when asked
+# (for example from https://neon.tech, which has a free plan).
+services:
+  - type: web
+    name: pickleball-booking
+    runtime: node
+    plan: free
+    buildCommand: npm install --omit=dev
+    startCommand: node server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: DATABASE_URL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
