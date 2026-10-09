@@ -7,7 +7,8 @@ everything from a dashboard. It looks and feels like an iPhone app, and it works
 
 **For players** (the public booking site)
 - See open courts for any day on a live court-by-time grid, then tap an open slot to book.
-- Choose the court, how long to play and how many players. The price updates as they choose (peak rates included).
+- Choose the court, how long to play and how many players. The price updates as they choose:
+  **total = number of players × hours × rate per hour** (hours inside peak time use the peak rate).
 - Pay by **bank transfer** (they're shown the club's bank details and a booking reference) or **at the venue**.
 - After paying by transfer, send the transfer reference so staff can match the payment.
 - **My Bookings**: find a booking by reference and email, add it to their calendar, or cancel it (within the club's cancellation window).
@@ -29,7 +30,7 @@ everything from a dashboard. It looks and feels like an iPhone app, and it works
   - **Bank accounts**: save one or more accounts and choose which one players pay into. Unpaid bookings switch to the new account straight away.
   - Opening hours, start-time interval (30 or 60 minutes), allowed booking lengths, players per court, how far ahead people can book,
     cancellation cutoff, automatic release of unpaid bookings.
-  - Rate per hour, optional peak rate and hours, currency, time zone.
+  - Rate per player per hour, optional peak rate and hours, currency, time zone.
   - Payment options (bank transfer and/or pay at venue) and payment instructions.
   - Change password, download a backup, sign out.
 

@@ -546,8 +546,11 @@ button.cell:focus-visible, a.cell:focus-visible { outline-offset: -3px; }
 .sh-right { justify-content: flex-end; }
 .sheet-body { overflow-y: auto; overscroll-behavior: contain; padding: 10px 16px calc(28px + env(safe-area-inset-bottom, 0px)); flex: 1; display: flex; flex-direction: column; gap: 24px; }
 .sheet-foot { flex: none; padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--sep); background: var(--bg); display: grid; gap: 10px; }
-.sheet-foot .total { display: flex; justify-content: space-between; align-items: baseline; font-size: 15px; color: var(--label-2); }
+.sheet-foot .total { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 15px; color: var(--label-2); }
 .sheet-foot .total strong { font-size: 22px; color: var(--label); font-variant-numeric: tabular-nums; }
+.sheet-foot .total .breakdown { display: block; font-size: 13px; margin-top: 2px; }
+.price-note { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; }
+.btn.btn-inline { min-height: 0; padding: 0; font-size: 13px; font-weight: 600; }
 @media (min-width: 700px) {
   .layer { align-items: center; padding: 24px; }
   .sheet { max-width: 560px; max-height: min(880px, 100%); border-radius: 16px; animation: pop 0.26s cubic-bezier(0.2, 0.9, 0.3, 1); box-shadow: var(--shadow-pop); }

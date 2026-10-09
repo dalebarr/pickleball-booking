@@ -202,16 +202,35 @@
     return fmt.dayTitle(d);
   }
 
-  function priceFor(start, duration) {
+  /** Minutes of a booking charged at the normal rate and at the peak rate. */
+  function rateMinutes(start, duration) {
     const ps = toMin(CFG.peakStart);
     const pe = toMin(CFG.peakEnd);
-    let total = 0;
+    let normal = 0;
+    let peak = 0;
     for (let m = start; m < start + duration; m += 30) {
       const seg = Math.min(30, start + duration - m);
-      const peak = CFG.peakEnabled && m >= ps && m < pe;
-      total += ((peak ? CFG.peakPricePerHour : CFG.pricePerHour) * seg) / 60;
+      if (CFG.peakEnabled && m >= ps && m < pe) peak += seg;
+      else normal += seg;
     }
-    return Math.round(total * 100) / 100;
+    return { normal, peak };
+  }
+
+  /** Total = number of players × hours × rate per hour (peak rate inside peak time). */
+  function priceFor(start, duration, players) {
+    const { normal, peak } = rateMinutes(start, duration);
+    const perPlayer = (normal * CFG.pricePerHour + peak * CFG.peakPricePerHour) / 60;
+    return Math.round(perPlayer * players * 100) / 100;
+  }
+
+  /** The same sum in words, e.g. "4 players × 2 hrs × $20.00/hr". */
+  function priceBreakdown(start, duration, players) {
+    const { normal, peak } = rateMinutes(start, duration);
+    const who = `${players} player${players === 1 ? '' : 's'}`;
+    const part = (min, rate) => `${fmt.dur(min)} × ${fmt.money(rate)}/hr`;
+    if (!peak) return `${who} × ${part(normal, CFG.pricePerHour)}`;
+    if (!normal) return `${who} × ${part(peak, CFG.peakPricePerHour)} (peak)`;
+    return `${who} × (${part(normal, CFG.pricePerHour)} + ${part(peak, CFG.peakPricePerHour)} peak)`;
   }
 
   function timeOptions(from, to, step = 30) {
@@ -932,7 +951,7 @@
     pg.setSubtitle(
       meta('clock', `Open ${fmt.range(CFG.openTime, CFG.closeTime)}`),
       meta('court', `${CFG.courts.length} court${CFG.courts.length > 1 ? 's' : ''}`),
-      meta('tag', `${fmt.money(CFG.pricePerHour)} per court per hour`));
+      meta('tag', `${fmt.money(CFG.pricePerHour)} per player per hour`));
     if (CFG.announcement) pg.content.append(banner('megaphone', CFG.announcement));
 
     const today = CFG.now.date;
@@ -951,7 +970,7 @@
           h('span', null, h('i', { class: 'l-booked' }), 'Booked'),
           h('span', null, h('i', { class: 'l-closed' }), 'Not available')),
         gridBox,
-        h('p', { class: 'group-foot', style: { padding: '0 4px' }, text: `Tap an open slot to book. Prices are per court, for up to ${CFG.maxPlayers} players.` })));
+        h('p', { class: 'group-foot', style: { padding: '0 4px' }, text: `Tap an open slot to book. Total = number of players × hours × ${fmt.money(CFG.pricePerHour)} per hour. Up to ${CFG.maxPlayers} players per court.` })));
 
     let reqId = 0;
     async function load(quiet) {
@@ -1006,11 +1025,12 @@
     const name = h('input', { autocomplete: 'name', maxlength: 80, placeholder: 'Required', value: saved.name || '' });
     const email = h('input', { type: 'email', autocomplete: 'email', inputmode: 'email', maxlength: 120, placeholder: 'you@example.com', value: saved.email || '' });
     const phone = h('input', { type: 'tel', autocomplete: 'tel', inputmode: 'tel', maxlength: 30, placeholder: 'Required', value: saved.phone || '' });
-    const players = stepper({ value: S.players, min: 1, max: CFG.maxPlayers, label: 'Players', onChange: (v) => { S.players = v; } });
+    const players = stepper({ value: S.players, min: 1, max: CFG.maxPlayers, label: 'Players', onChange: (v) => { S.players = v; refresh(); } });
     const notes = h('textarea', { maxlength: 300, placeholder: 'Anything the club should know (optional)', 'aria-label': 'Notes' });
     const methodSeg = methods.length > 1 ? seg(methods, S.method, (v) => { S.method = v; refresh(); }, 'Payment method') : null;
     const methodNote = h('p', { class: 'group-foot' });
     const total = h('strong');
+    const breakdown = h('span', { class: 'breakdown' });
     const formId = 'book-form-' + ++uid;
     const submit = h('button', { type: 'submit', form: formId, class: 'btn btn-filled btn-lg', text: 'Confirm Booking' });
 
@@ -1034,7 +1054,7 @@
       h('p', { class: 'group-foot', style: { padding: '0 4px' }, text: cancelPolicyText() }));
 
     sh.setBody(form);
-    sh.setFoot(h('div', { class: 'total' }, h('span', { text: 'Total' }), total), submit);
+    sh.setFoot(h('div', { class: 'total' }, h('span', null, 'Total', breakdown), total), submit);
     if (!methods.length) submit.disabled = true;
 
     function refresh() {
@@ -1045,8 +1065,9 @@
       }
       const end = startMin + S.duration;
       const peak = CFG.peakEnabled && startMin < toMin(CFG.peakEnd) && end > toMin(CFG.peakStart);
-      endNote.textContent = `Ends at ${fmt.time(toTime(end))}${peak ? ` · Peak rate of ${fmt.money(CFG.peakPricePerHour)} per hour applies from ${fmt.time(CFG.peakStart)}` : ''}`;
-      total.textContent = fmt.money(priceFor(startMin, S.duration));
+      endNote.textContent = `Ends at ${fmt.time(toTime(end))}${peak ? ` · Peak rate of ${fmt.money(CFG.peakPricePerHour)} per player per hour applies from ${fmt.time(CFG.peakStart)}` : ''}`;
+      total.textContent = fmt.money(priceFor(startMin, S.duration, S.players));
+      breakdown.textContent = priceBreakdown(startMin, S.duration, S.players);
       methodNote.textContent = S.method === 'bank'
         ? `You’ll see the bank details on the next screen. ${CFG.autoCancelHours ? `Unpaid bookings are released after ${CFG.autoCancelHours} hour${CFG.autoCancelHours > 1 ? 's' : ''}.` : 'We hold your slot while we wait for your payment.'}`
         : 'Pay at the front desk before you play.';
@@ -1154,7 +1175,7 @@
           row('Court', b.courtName),
           row('Players', String(b.players)),
           row('Name', b.name),
-          row('Total', fmt.money(b.amount, b.currency), { strong: true }),
+          row('Total', fmt.money(b.amount, b.currency), { strong: true, sub: `${b.players} player${b.players === 1 ? '' : 's'} × ${fmt.dur(b.duration)}` }),
           row('Payment', h('span', { class: 'chips' }, chip(PAY, b.paymentStatus), h('span', { text: METHOD[b.paymentMethod] }))),
         ],
       }),
@@ -1364,9 +1385,9 @@
 
     const hours = [
       cell({ ic: 'clock', title: 'Open daily', value: fmt.range(c.openTime, c.closeTime) }),
-      cell({ ic: 'tag', title: 'Court rate', value: `${fmt.money(c.pricePerHour)} / hour` }),
+      cell({ ic: 'tag', title: 'Rate per player', value: `${fmt.money(c.pricePerHour)} / hour` }),
     ];
-    if (c.peakEnabled) hours.push(cell({ ic: 'tag', c: 'orange', title: `Peak rate (${fmt.range(c.peakStart, c.peakEnd)})`, value: `${fmt.money(c.peakPricePerHour)} / hour` }));
+    if (c.peakEnabled) hours.push(cell({ ic: 'tag', c: 'orange', title: `Peak rate per player (${fmt.range(c.peakStart, c.peakEnd)})`, value: `${fmt.money(c.peakPricePerHour)} / hour` }));
     hours.push(
       cell({ ic: 'calendar', title: 'Booking lengths', value: c.durations.map(fmt.dur).join(', ') }),
       cell({ ic: 'calPlus', title: 'Book ahead', value: `Up to ${c.advanceDays} days` }),
@@ -1381,7 +1402,7 @@
       contact.length ? group({ title: 'Contact', items: contact }) : null,
       h('div', { class: 'cols c-1-1' },
         h('div', { class: 'stack' },
-          group({ title: 'Hours and prices', items: hours, foot: 'Prices are per court, not per player.' }),
+          group({ title: 'Hours and prices', items: hours, foot: 'Total = number of players × hours × rate per hour.' }),
           group({ title: 'Courts', items: c.courts.map((ct) => cell({ ic: 'court', title: ct.name })) })),
         h('div', { class: 'stack' },
           group({
@@ -1507,7 +1528,7 @@
     errBox,
     group({ title: 'Club', items: [field('Club name', nameIn), field('Time zone', tzIn), field('Currency', curIn)] }),
     group({ title: 'Courts', items: [cell({ title: 'Number of courts', value: courts.valueEl, right: courts })], foot: 'Between 1 and 3 courts.' }),
-    group({ title: 'Hours and price', items: [field('Opens', openIn), field('Closes', closeIn), field(`Rate per hour`, rateIn)] }),
+    group({ title: 'Hours and price', items: [field('Opens', openIn), field('Closes', closeIn), field('Rate per player / hr', rateIn)], foot: 'Each booking costs: number of players × hours × rate per hour.' }),
     group({ title: 'Staff password', items: [field('Password', pw1), field('Confirm', pw2)], foot: 'Share it only with staff who manage bookings.' }),
     btn));
     nameIn.focus();
@@ -1565,7 +1586,7 @@
         if (b.notes) contact.push(h('div', { class: 'cell' }, h('div', { class: 'cell-main' }, h('div', { class: 'cell-sub', text: 'Notes' }), h('div', { class: 'cell-title', text: b.notes }))));
         nodes.push(group({ title: 'Player', items: contact }));
         const pay = [
-          row('Amount', fmt.money(b.amount, b.currency), { strong: true }),
+          row('Amount', fmt.money(b.amount, b.currency), { strong: true, sub: `${b.players} player${b.players === 1 ? '' : 's'} × ${fmt.dur(b.duration)}` }),
           row('Method', METHOD[b.paymentMethod]),
           row('Status', chip(PAY, b.paymentStatus)),
         ];
@@ -1634,9 +1655,21 @@
     sh.setLeft(plainBtn('Cancel', sh.close));
     sh.setRight(saveBtn);
 
-    const amountIn = h('input', { type: 'number', inputmode: 'decimal', min: 0, step: '0.01', class: 'right', oninput: () => { amountTouched = true; } });
+    const amountIn = h('input', { type: 'number', inputmode: 'decimal', min: 0, step: '0.01', class: 'right', oninput: () => { amountTouched = true; syncPrice(); } });
     const durSel = h('select');
     const endNote = h('p', { class: 'group-foot' });
+    const priceNote = h('div', { class: 'group-foot price-note' });
+
+    // The amount follows players × hours × rate until staff type their own amount.
+    function syncPrice() {
+      const s = toMin(S.start);
+      const byRate = priceFor(s, S.duration, S.players);
+      if (!amountTouched) amountIn.value = String(byRate);
+      const differs = amountTouched && Math.abs(Number(amountIn.value || 0) - byRate) > 0.005;
+      priceNote.replaceChildren(
+        h('span', { text: `${priceBreakdown(s, S.duration, S.players)} = ${fmt.money(byRate)}` }),
+        differs ? h('button', { type: 'button', class: 'btn btn-plain btn-inline', text: 'Use This Amount', onclick: () => { amountTouched = false; syncPrice(); } }) : '');
+    }
 
     function syncTimes() {
       const s = toMin(S.start);
@@ -1645,7 +1678,7 @@
       if (S.duration > max) S.duration = Math.max(30, Math.floor(max / 30) * 30);
       durSel.value = String(S.duration);
       endNote.textContent = `Ends at ${fmt.time(toTime(s + S.duration))}.`;
-      if (!amountTouched) amountIn.value = String(priceFor(s, S.duration));
+      syncPrice();
     }
 
     function build() {
@@ -1675,7 +1708,7 @@
         const name = h('input', { maxlength: 80, placeholder: 'Required', value: S.name, autocomplete: 'off', oninput: (ev) => { S.name = ev.target.value; } });
         const email = h('input', { type: 'email', maxlength: 120, placeholder: 'Optional', value: S.email, autocomplete: 'off', oninput: (ev) => { S.email = ev.target.value; } });
         const phone = h('input', { type: 'tel', maxlength: 30, placeholder: 'Optional', value: S.phone, autocomplete: 'off', oninput: (ev) => { S.phone = ev.target.value; } });
-        const players = stepper({ value: S.players, min: 1, max: 8, label: 'Players', onChange: (v) => { S.players = v; } });
+        const players = stepper({ value: S.players, min: 1, max: 8, label: 'Players', onChange: (v) => { S.players = v; syncPrice(); } });
         const notes = h('textarea', { maxlength: 300, 'aria-label': 'Notes', placeholder: 'Notes (optional)', value: S.notes, oninput: (ev) => { S.notes = ev.target.value; } });
         const ref = h('input', { maxlength: 60, placeholder: 'Optional', value: S.paymentReference, oninput: (ev) => { S.paymentReference = ev.target.value; } });
         nodes.push(group({ title: 'Player', items: [field('Name', name), field('Email', email), field('Mobile', phone), cell({ title: 'Players', value: players.valueEl, right: players }), field(null, notes, { stack: true })] }));
@@ -1688,7 +1721,7 @@
             field('Transfer ref.', ref),
             field('Booking status', select(['pending', 'confirmed', 'completed', 'no_show', 'cancelled'].map((k) => ({ value: k, label: STATUS[k].label })), S.status, { onchange: (ev) => { S.status = ev.target.value; } })),
           ],
-          foot: amountTouched ? null : 'The amount follows your court rates. Type a different amount to override it.',
+          foot: priceNote,
         }));
       }
       sh.setBody(nodes);
@@ -2338,16 +2371,16 @@
     function pricingSection() {
       const items = [
         field('Currency', select(res.currencies.map((c) => ({ value: c, label: c })), D.currency, { id: 'set-currency', onchange: (ev) => { D.currency = ev.target.value; changed(); slots.pricing(); } })),
-        field(`Rate / hour (${D.currency})`, number('pricePerHour', { decimal: true })),
+        field(`Rate per player / hr (${D.currency})`, number('pricePerHour', { decimal: true })),
         cell({ title: 'Peak pricing', sub: 'Charge a different rate at busy times', right: toggle(D.peakEnabled, (v) => { D.peakEnabled = v; changed(); slots.pricing(); }, 'Peak pricing', 'set-peak') }),
       ];
       if (D.peakEnabled) {
         items.push(
           field('Peak starts', timeSel('peakStart', 0, 23 * 60 + 30)),
           field('Peak ends', timeSel('peakEnd', 30, 1440)),
-          field(`Peak rate (${D.currency})`, number('peakPricePerHour', { decimal: true })));
+          field(`Peak rate per player / hr (${D.currency})`, number('peakPricePerHour', { decimal: true })));
       }
-      return group({ title: 'Pricing', items, foot: 'Prices are per court for the whole booking, not per player. Changes apply to new bookings only.' });
+      return group({ title: 'Pricing', items, foot: 'Each booking costs: number of players × hours × rate per hour. Hours inside peak time use the peak rate. Changes apply to new bookings only.' });
     }
 
     function paymentsSection() {
