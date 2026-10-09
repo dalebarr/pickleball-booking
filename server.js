@@ -24,10 +24,39 @@ let backend;
 // ---- Persistence helpers --------------------------------------------------------------------
 
 function saveMeta() { backend.saveMeta(state); }
-function saveBooking(b) { backend.saveBooking(state, b); }
+
+// ---- Live updates ---------------------------------------------------------------------------
+// Signed-in staff screens keep a Server-Sent Events stream open. Every booking or
+// settings change is announced on it, so dashboards refresh without a page reload.
+
+const liveClients = new Set(); // { res, exp }
+
+function broadcast(event) {
+  const payload = `event: change\ndata: ${JSON.stringify(event)}\n\n`;
+  const now = Date.now();
+  for (const c of liveClients) {
+    if (c.exp < now) {
+      c.res.end();
+      liveClients.delete(c);
+    } else {
+      c.res.write(payload);
+    }
+  }
+}
+
+// Each browser tab sends a random id, so it can tell its own changes from other people's.
+const clientId = (req) => (req ? String(req.headers['x-client-id'] || '').slice(0, 64) : '');
+
+function saveBooking(b, req, action) {
+  backend.saveBooking(state, b);
+  broadcast({
+    kind: 'booking', action, by: clientId(req),
+    id: b.id, ref: b.ref, type: b.type, name: b.name, date: b.date, start: b.start, court: b.court,
+  });
+}
 
 function sweep() {
-  for (const b of B.sweepExpired(state)) saveBooking(b);
+  for (const b of B.sweepExpired(state)) saveBooking(b, null, 'expired');
 }
 
 // ---- Sessions and rate limits ------------------------------------------------------------------
@@ -78,14 +107,17 @@ function sessionCookie(req, token, maxAgeSeconds) {
   ].filter(Boolean).join('; ');
 }
 
-function isAdmin(req) {
-  if (!state.auth) return false;
+/** Expiry time (ms) of a valid staff session cookie, or 0 when there is none. */
+function sessionExpiry(req) {
+  if (!state.auth) return 0;
   const [e, sig] = String(parseCookies(req).pb_session || '').split('.');
   const exp = Number(e);
-  if (!exp || exp < Date.now() || !sig) return false;
+  if (!exp || exp < Date.now() || !sig) return 0;
   const good = signSession(exp);
-  return sig.length === good.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(good));
+  return sig.length === good.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(good)) ? exp : 0;
 }
+
+const isAdmin = (req) => sessionExpiry(req) > 0;
 
 function clientIp(req) {
   return String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '?';
@@ -206,7 +238,7 @@ route('GET', '/api/public/availability', ({ query }) => {
 route('POST', '/api/public/bookings', ({ req, body }) => {
   rateLimit(req, 'book', 20, 3600000);
   const b = B.createPublicBooking(state, body);
-  saveBooking(b);
+  saveBooking(b, req, 'created');
   return B.playerView(state, b);
 });
 
@@ -219,14 +251,14 @@ route('POST', '/api/public/lookup', ({ req, body }) => {
 route('POST', '/api/public/cancel', ({ req, body }) => {
   rateLimit(req, 'lookup', 60, 900000);
   const b = B.playerCancel(state, B.findForPlayer(state, body.ref, body.email));
-  saveBooking(b);
+  saveBooking(b, req, 'cancelled');
   return B.playerView(state, b);
 });
 
 route('POST', '/api/public/payment', ({ req, body }) => {
   rateLimit(req, 'lookup', 60, 900000);
   const b = B.playerPaymentNotice(state, B.findForPlayer(state, body.ref, body.email), body.reference);
-  saveBooking(b);
+  saveBooking(b, req, 'payment');
   return B.playerView(state, b);
 });
 
@@ -287,14 +319,33 @@ route('GET', '/api/admin/settings', () => ({
   currencies: B.CURRENCIES,
   durationChoices: B.DURATION_CHOICES,
   limits: { minCourts: B.MIN_COURTS, maxCourts: B.MAX_COURTS },
-  storage: backend.describe(),
 }), { admin: true });
 
-route('PUT', '/api/admin/settings', ({ body }) => {
+route('PUT', '/api/admin/settings', ({ req, body }) => {
   state.settings = B.sanitizeSettings(state, body.settings || body);
   saveMeta();
+  broadcast({ kind: 'settings', by: clientId(req) });
   return { settings: state.settings };
 }, { admin: true });
+
+route('GET', '/api/admin/events', ({ req, res }) => {
+  res.writeHead(200, {
+    ...SECURITY_HEADERS,
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.write('retry: 5000\n\n');
+  const client = { res, exp: sessionExpiry(req) };
+  liveClients.add(client);
+  // A comment line every 25 s keeps proxies from closing an idle stream.
+  const ping = setInterval(() => res.write(': ping\n\n'), 25000);
+  req.on('close', () => {
+    clearInterval(ping);
+    liveClients.delete(client);
+  });
+}, { admin: true, raw: true });
 
 route('GET', '/api/admin/dashboard', () => {
   sweep();
@@ -307,31 +358,32 @@ route('GET', '/api/admin/bookings', ({ query }) => {
   return { bookings: R.applyFilters(state.bookings, f), now: U.nowIn(state.settings.timezone) };
 }, { admin: true });
 
-route('POST', '/api/admin/bookings', ({ body }) => {
+route('POST', '/api/admin/bookings', ({ req, body }) => {
   const b = B.upsertStaffBooking(state, body, null);
-  saveBooking(b);
+  saveBooking(b, req, 'created');
   return b;
 }, { admin: true });
 
-route('PATCH', '/api/admin/bookings/:id', ({ params, body }) => {
+route('PATCH', '/api/admin/bookings/:id', ({ req, params, body }) => {
   const b = B.upsertStaffBooking(state, body, findBooking(params.id));
-  saveBooking(b);
+  saveBooking(b, req, 'updated');
   return b;
 }, { admin: true });
 
-route('POST', '/api/admin/bookings/:id/action', ({ params, body }) => {
+route('POST', '/api/admin/bookings/:id/action', ({ req, params, body }) => {
   const b = B.applyAction(state, findBooking(params.id), body.action);
-  saveBooking(b);
+  saveBooking(b, req, body.action);
   return b;
 }, { admin: true });
 
-route('DELETE', '/api/admin/bookings/:id', ({ params }) => {
+route('DELETE', '/api/admin/bookings/:id', ({ req, params }) => {
   const b = findBooking(params.id);
   if (b.type !== 'block' && b.status !== 'cancelled') {
     throw U.bad('Cancel this booking before deleting it, so it stays out of your reports by mistake');
   }
   state.bookings = state.bookings.filter((x) => x.id !== b.id);
   backend.deleteBooking(state, b.id);
+  broadcast({ kind: 'booking', action: 'deleted', by: clientId(req), id: b.id, ref: b.ref, type: b.type });
   return { ok: true };
 }, { admin: true });
 
@@ -475,6 +527,7 @@ async function start() {
   });
 
   const shutdown = async () => {
+    for (const c of liveClients) c.res.end();
     server.close();
     try { await backend.close(); } catch (err) { console.error(err); }
     process.exit(0);

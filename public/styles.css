@@ -17,6 +17,11 @@
   --sep: rgba(60, 60, 67, 0.17);
   --sep-strong: rgba(60, 60, 67, 0.29);
   --bar: rgba(249, 249, 249, 0.84);
+  --glass: rgba(255, 255, 255, 0.58);
+  --glass-strong: rgba(255, 255, 255, 0.72);
+  --glass-edge: rgba(255, 255, 255, 0.85);
+  --glass-border: rgba(60, 60, 67, 0.12);
+  --glass-shadow: 0 10px 30px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.06);
   --seg-on: #FFFFFF;
   --alert-bg: rgba(242, 242, 242, 0.94);
   --toast-bg: rgba(28, 28, 30, 0.94);
@@ -64,6 +69,11 @@
     --sep: rgba(84, 84, 88, 0.55);
     --sep-strong: rgba(84, 84, 88, 0.8);
     --bar: rgba(22, 22, 24, 0.84);
+    --glass: rgba(44, 44, 46, 0.5);
+    --glass-strong: rgba(28, 28, 30, 0.66);
+    --glass-edge: rgba(255, 255, 255, 0.14);
+    --glass-border: rgba(255, 255, 255, 0.1);
+    --glass-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
     --seg-on: #636366;
     --alert-bg: rgba(44, 44, 46, 0.94);
     --toast-bg: rgba(58, 58, 60, 0.96);
@@ -99,6 +109,11 @@
   --sep: rgba(84, 84, 88, 0.55);
   --sep-strong: rgba(84, 84, 88, 0.8);
   --bar: rgba(22, 22, 24, 0.84);
+  --glass: rgba(44, 44, 46, 0.5);
+  --glass-strong: rgba(28, 28, 30, 0.66);
+  --glass-edge: rgba(255, 255, 255, 0.14);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
   --seg-on: #636366;
   --alert-bg: rgba(44, 44, 46, 0.94);
   --toast-bg: rgba(58, 58, 60, 0.96);
@@ -175,7 +190,7 @@ h1, h2, h3, p { margin: 0; }
 
 .brand { display: flex; align-items: center; gap: 10px; padding: 4px 10px 14px; min-width: 0; }
 .brand-mark { width: 34px; height: 34px; flex: none; border-radius: 9px; background: #0B7A4D; display: grid; place-items: center; }
-.brand-mark svg { width: 24px; height: 24px; }
+.brand-mark img { width: 28px; height: 28px; display: block; }
 .brand-name { font-weight: 700; font-size: 17px; line-height: 1.2; overflow-wrap: anywhere; }
 .brand-sub { font-size: 12px; color: var(--label-2); }
 .side-label { font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--label-2); padding: 14px 10px 6px; }
@@ -225,6 +240,38 @@ h1, h2, h3, p { margin: 0; }
 .navbar.scrolled .nav-title { opacity: 1; }
 .nav-left, .nav-right { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .nav-right { justify-content: flex-end; }
+
+/* ---- Phone and small tablet: frosted-glass top bar and a floating glass tab bar ---- */
+@media (max-width: 899px) {
+  .navbar, .navbar.scrolled {
+    background: var(--glass-strong);
+    -webkit-backdrop-filter: saturate(190%) blur(24px);
+    backdrop-filter: saturate(190%) blur(24px);
+    border-bottom: 1px solid var(--glass-border);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.05);
+  }
+  .navbar .icon-btn, .navbar .btn-plain {
+    background: var(--glass);
+    border: 1px solid var(--glass-border);
+    box-shadow: inset 0 1px 0 var(--glass-edge);
+    border-radius: 999px;
+  }
+  .navbar .btn-plain { padding: 0 12px; min-height: 34px; }
+  .tabbar {
+    left: max(12px, calc(50% - 260px)); right: max(12px, calc(50% - 260px));
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
+    gap: 4px; padding: 6px;
+    border-radius: 32px;
+    background: var(--glass);
+    -webkit-backdrop-filter: saturate(190%) blur(24px);
+    backdrop-filter: saturate(190%) blur(24px);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-edge);
+  }
+  .tab { min-height: 50px; border-radius: 26px; transition: background-color 0.2s; }
+  .tab[aria-current="page"] { background: var(--tint-soft-2); }
+  .main { padding-bottom: calc(64px + 10px + env(safe-area-inset-bottom, 0px) + 32px); }
+}
 
 .content { max-width: 1120px; margin: 0 auto; padding-inline: var(--gutter); display: flex; flex-direction: column; gap: 26px; }
 .title-block { display: grid; gap: 4px; padding-top: 2px; }
@@ -500,15 +547,13 @@ button.cell:focus-visible, a.cell:focus-visible { outline-offset: -3px; }
   background: repeating-linear-gradient(135deg, var(--fill) 0 2px, transparent 2px 7px);
   color: transparent; cursor: default;
 }
-.slot.staff-past { background: transparent; color: var(--label-3); }
-.slot.staff-past:hover { background: var(--fill); color: var(--tint); }
 .item {
   margin: 3px; border-radius: 9px; padding: 5px 8px; min-width: 0; overflow: hidden;
   display: flex; flex-direction: column; gap: 1px; text-align: left; border: 0;
   background: var(--fill); color: var(--label-2); font-size: 12.5px; line-height: 1.25; z-index: 1;
 }
 .item .it-title { font-weight: 600; color: var(--label); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
-.item .it-sub { font-size: 11.5px; color: var(--label-2); white-space: nowrap; }
+.item .it-sub { font-size: 11.5px; color: var(--label-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .item.public { justify-content: center; align-items: center; font-weight: 600; }
 .item.staff {
   --c: var(--gray);
@@ -716,7 +761,25 @@ table.rtable { width: 100%; border-collapse: collapse; font-size: 14px; }
 
 .auth-card { max-width: 460px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 22px; }
 .auth-logo { width: 72px; height: 72px; border-radius: 18px; background: #0B7A4D; display: grid; place-items: center; }
-.auth-logo svg { width: 50px; height: 50px; }
+.auth-logo img { width: 58px; height: 58px; display: block; }
+
+/* Phone: the save bar and messages float above the glass tab bar. */
+@media (max-width: 899px) {
+  .savebar {
+    left: 12px; right: 12px; bottom: calc(64px + 20px + env(safe-area-inset-bottom, 0px));
+    padding: 10px 14px; border-radius: 22px; border-top: 0;
+    background: var(--glass-strong);
+    -webkit-backdrop-filter: saturate(190%) blur(24px);
+    backdrop-filter: saturate(190%) blur(24px);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-edge);
+  }
+  .toast { bottom: calc(64px + 22px + env(safe-area-inset-bottom, 0px)); }
+}
+/* Browsers without blur get solid bars so text stays readable. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .navbar, .navbar.scrolled, .tabbar, .savebar { background: var(--bar); }
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }

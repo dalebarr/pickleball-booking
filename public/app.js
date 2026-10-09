@@ -91,12 +91,6 @@
     appearance: '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor"/>',
     external: '<path d="M14 4h6v6M20 4l-9 9M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/>',
   };
-  const BALL_SVG =
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="#D4E42A"/>' +
-    '<g fill="#97A80F"><circle cx="12" cy="12" r="1.25"/><circle cx="12" cy="7.1" r="1.05"/><circle cx="12" cy="16.9" r="1.05"/>' +
-    '<circle cx="7.75" cy="9.55" r="1.05"/><circle cx="16.25" cy="9.55" r="1.05"/><circle cx="7.75" cy="14.45" r="1.05"/>' +
-    '<circle cx="16.25" cy="14.45" r="1.05"/></g></svg>';
-
   function icon(name, cls) {
     const span = document.createElement('span');
     span.className = 'ico' + (cls ? ' ' + cls : '');
@@ -107,11 +101,8 @@
     return span;
   }
 
-  function ballMark(cls) {
-    const el = h('span', { class: cls });
-    el.innerHTML = BALL_SVG;
-    return el;
-  }
+  /** The club logo: a pickleball paddle and ball (public/icons/logo.svg). */
+  const brandMark = (cls) => h('span', { class: cls }, h('img', { src: '/icons/logo.svg', alt: '' }));
 
   // =====================================================================================
   // Dates, times and money
@@ -264,6 +255,8 @@
 
   let CFG = null;
   let ADMIN = { signedIn: false, needsPassword: false };
+  // Identifies this tab to the server, so live updates can tell our own changes from other people's.
+  const CLIENT_ID = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
   async function api(path, { method = 'GET', body } = {}) {
     let res;
@@ -271,7 +264,7 @@
       res = await fetch(path, {
         method,
         credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'pickleball' },
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'pickleball', 'X-Client-Id': CLIENT_ID },
         body: body ? JSON.stringify(body) : undefined,
       });
     } catch {
@@ -293,6 +286,76 @@
     CFG = await api('/api/public/config');
     document.title = CFG.setupComplete ? `${CFG.facilityName} · Court Booking` : 'Court Booking';
   }
+
+  /** The current date and minute of the day at the club, read from this device's clock. */
+  function clubNow() {
+    try {
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: CFG.timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+      }).formatToParts(new Date());
+      const get = (t) => parts.find((p) => p.type === t).value;
+      return { date: `${get('year')}-${get('month')}-${get('day')}`, minutes: Number(get('hour')) * 60 + Number(get('minute')) };
+    } catch {
+      return CFG.now;
+    }
+  }
+
+  const isFutureStart = (date, start, now = clubNow()) => date > now.date || (date === now.date && toMin(start) > now.minutes);
+
+  // ---- Live updates (staff screens) ------------------------------------------------------
+  // The server pushes a message whenever a booking changes. The open staff screen
+  // registers a refresh in live.handler; other people's new bookings also show a toast.
+  // If the stream can't stay open, a slow poll keeps the screen current.
+
+  const live = { es: null, handler: null, debounce: null, retry: null };
+
+  const LIVE_TOASTS = {
+    created: (e) => `New booking: ${e.name}, ${courtName(e.court)}, ${dayLabel(e.date)} at ${fmt.time(e.start)}`,
+    payment: (e) => `${e.name} sent payment details (${e.ref})`,
+    cancelled: (e) => `${e.name} cancelled ${e.ref}`,
+  };
+
+  function liveRefresh(event) {
+    clearTimeout(live.debounce);
+    live.debounce = setTimeout(() => {
+      if (live.handler) Promise.resolve(live.handler(event)).catch(() => { /* next update retries */ });
+    }, 300);
+  }
+
+  function liveConnect() {
+    if (live.es || !('EventSource' in window)) return;
+    clearTimeout(live.retry);
+    const es = new EventSource('/api/admin/events');
+    live.es = es;
+    es.addEventListener('change', (msg) => {
+      let e = {};
+      try { e = JSON.parse(msg.data); } catch { return; }
+      const fromOthers = e.by !== CLIENT_ID;
+      if (fromOthers && e.kind === 'booking' && e.type === 'booking' && LIVE_TOASTS[e.action]) toast(LIVE_TOASTS[e.action](e));
+      if (fromOthers && e.kind === 'settings') loadConfig().catch(() => {});
+      liveRefresh(e);
+    });
+    es.onerror = () => {
+      if (es.readyState !== EventSource.CLOSED) return; // the browser is reconnecting by itself
+      liveDisconnect();
+      live.retry = setTimeout(() => { if (location.hash.startsWith('#/admin')) liveConnect(); }, 15000);
+    };
+  }
+
+  function liveDisconnect() {
+    clearTimeout(live.retry);
+    if (live.es) {
+      live.es.close();
+      live.es = null;
+    }
+  }
+
+  // Catch up when the tab comes back into view, and poll if the live stream is down.
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) liveRefresh({ kind: 'visible' }); });
+  setInterval(() => {
+    const streaming = live.es && live.es.readyState === EventSource.OPEN;
+    if (!streaming && !document.hidden) liveRefresh({ kind: 'poll' });
+  }, 30000);
 
   const prefs = {
     get(k, d) {
@@ -696,16 +759,18 @@
         const t = open + r * step;
         const style = { gridColumn: String(ci + 2), gridRow: String(r + 2) };
         const when = `${c.name}, ${fmt.time(toTime(t))}`;
+        // Slots that have already started can't be booked by anyone.
+        const started = isPast || (isToday && t <= now.minutes);
         if (staff) {
-          const past = isPast || (isToday && t + step <= now.minutes);
-          grid.append(h('button', {
-            type: 'button', class: 'slot' + (past ? ' staff-past' : ''), style,
-            'aria-label': `${when}, open. Add a booking`, title: 'Add a booking',
-            onclick: () => onFree(c.id, toTime(t)),
-          }, icon('plus')));
+          grid.append(started
+            ? h('div', { class: 'slot closed', style, 'aria-label': `${when}, time has passed`, role: 'img' })
+            : h('button', {
+              type: 'button', class: 'slot', style,
+              'aria-label': `${when}, open. Add a booking`, title: 'Add a booking',
+              onclick: () => onFree(c.id, toTime(t)),
+            }, icon('plus')));
           continue;
         }
-        const started = isPast || (isToday && t <= now.minutes);
         const fits = !started && CFG.durations.some((d) => t + d <= close && !overlaps(c.id, t, t + d));
         if (!fits) {
           grid.append(h('div', { class: 'slot closed', style, 'aria-label': `${when}, not available`, role: 'img' }));
@@ -860,7 +925,7 @@
         h('button', { type: 'button', class: 'side-link', onclick: signOut }, icon('logout'), h('span', { text: 'Sign out' }))]
       : [link('/admin', 'Staff sign in', 'lock', 'side-link')];
     $('#sidebar').replaceChildren(
-      h('div', { class: 'brand' }, ballMark('brand-mark'), h('div', null, h('div', { class: 'brand-name', text: name }), h('div', { class: 'brand-sub', text: area === 'admin' ? 'Staff' : 'Court booking' }))),
+      h('div', { class: 'brand' }, brandMark('brand-mark'), h('div', null, h('div', { class: 'brand-name', text: name }), h('div', { class: 'brand-sub', text: area === 'admin' ? 'Staff' : 'Court booking' }))),
       h('div', { class: 'side-label', text: area === 'admin' ? 'Manage' : 'Play' }),
       ...items.map(([p, l, ic]) => link(p, l, ic, 'side-link')),
       h('div', { class: 'side-foot' }, foot));
@@ -912,6 +977,9 @@
       if (ADMIN.signedIn) return go('/admin');
     }
     currentPath = path;
+    live.handler = null;
+    if (def.area === 'admin') liveConnect();
+    else liveDisconnect();
     shell(def.area, path);
     const main = $('#main');
     main.replaceChildren();
@@ -1455,7 +1523,7 @@
         }
       },
     },
-    ballMark('auth-logo'),
+    brandMark('auth-logo'),
     h('p', { class: 'muted', text: `Sign in to manage bookings, payments, reports and settings for ${CFG.facilityName}.` }),
     errBox,
     group({ items: [field('Password', pw)], foot: 'Forgot the password? Whoever hosts the app can reset it with the RESET_ADMIN_PASSWORD setting (see the README).' }),
@@ -1523,7 +1591,7 @@
         }
       },
     },
-    ballMark('auth-logo'),
+    brandMark('auth-logo'),
     h('p', { class: 'muted', text: 'Add the basics and a staff password. You can change everything later in Settings, including the bank account players pay into.' }),
     errBox,
     group({ title: 'Club', items: [field('Club name', nameIn), field('Time zone', tzIn), field('Currency', curIn)] }),
@@ -1648,6 +1716,35 @@
     const open = toMin(CFG.openTime);
     const close = toMin(CFG.closeTime);
     if (toMin(S.start) < open || toMin(S.start) >= close) S.start = CFG.openTime;
+    if (!isEdit) {
+      // New bookings start at the next open half hour: never a date or time that has passed.
+      const now = clubNow();
+      if (S.date < now.date) S.date = now.date;
+      if (S.date === now.date && toMin(S.start) <= now.minutes) {
+        const next = Math.max(open, Math.floor(now.minutes / 30) * 30 + 30);
+        if (next <= close - 30) S.start = toTime(next);
+        else {
+          S.date = addDays(now.date, 1);
+          S.start = CFG.openTime;
+        }
+      }
+    }
+    const pastMessage = 'That time has already passed. Choose a later time today or a future date.';
+    // An existing booking may keep its own (possibly past) slot; anything else must be in the future.
+    const keepsOwnSlot = (date, start) => isEdit && date === e.date && start === e.start;
+    const startSel = h('select', { onchange: (ev) => { S.start = ev.target.value; syncTimes(); } });
+
+    function syncStartOptions() {
+      const now = clubNow();
+      const options = timeOptions(open, close - 30).map((o) => ({ ...o, disabled: !isFutureStart(S.date, o.value, now) && !keepsOwnSlot(S.date, o.value) }));
+      startSel.replaceChildren(...options.map((o) => h('option', { value: o.value, text: o.label, disabled: o.disabled || null })));
+      const current = options.find((o) => o.value === S.start);
+      if (!current || current.disabled) {
+        const firstOpen = options.find((o) => !o.disabled);
+        if (firstOpen) S.start = firstOpen.value;
+      }
+      startSel.value = S.start;
+    }
 
     const sh = openSheet({ title: '', guard: true });
     const errBox = h('div');
@@ -1683,8 +1780,16 @@
 
     function build() {
       sh.setTitle(isEdit ? (S.type === 'block' ? 'Edit Blocked Time' : 'Edit Booking') : (S.type === 'block' ? 'Block Court Time' : 'New Booking'));
-      const dateIn = h('input', { type: 'date', value: S.date, onchange: (ev) => { if (ev.target.value) S.date = ev.target.value; } });
-      const startSel = select(timeOptions(open, close - 30), S.start, { onchange: (ev) => { S.start = ev.target.value; syncTimes(); } });
+      const dateIn = h('input', {
+        type: 'date', value: S.date, min: isEdit ? null : clubNow().date,
+        onchange: (ev) => {
+          if (!ev.target.value) return;
+          S.date = ev.target.value;
+          syncStartOptions();
+          syncTimes();
+        },
+      });
+      syncStartOptions();
       durSel.onchange = () => { S.duration = Number(durSel.value); syncTimes(); };
       const nodes = [errBox];
       if (!isEdit) {
@@ -1734,6 +1839,12 @@
       errBox.replaceChildren();
       if (S.type === 'booking' && !S.name.trim()) {
         errBox.replaceChildren(banner('alert', 'Enter the player’s name.', 'error'));
+        sh.body.scrollTop = 0;
+        return;
+      }
+      const moved = !isEdit || S.date !== e.date || S.start !== e.start || S.court !== e.court;
+      if (moved && !isFutureStart(S.date, S.start)) {
+        errBox.replaceChildren(banner('alert', pastMessage, 'error'));
         sh.body.scrollTop = 0;
         return;
       }
@@ -1854,6 +1965,7 @@
     }
 
     await reload();
+    live.handler = () => reload(); // refresh when anyone books, pays or cancels
   }
 
   function tile(ic, label, value, sub, extra, attn) {
@@ -1929,12 +2041,12 @@
     let data = [];
     let now = CFG.now;
     let reqId = 0;
-    async function load() {
+    async function load(quiet) {
       const id = ++reqId;
       title.textContent = dayLabel(schedDate);
       strip.set(schedDate);
       picker.set(schedDate);
-      box.replaceChildren(loading());
+      if (!quiet) box.replaceChildren(loading());
       try {
         const r = await api(`/api/admin/bookings?from=${schedDate}&to=${schedDate}&type=all`);
         if (id !== reqId) return;
@@ -1947,9 +2059,10 @@
     }
 
     function draw() {
-      const live = data.filter((b) => b.status !== 'cancelled');
-      const bookings = live.filter((b) => b.type === 'booking');
-      const cancelled = data.length - live.length;
+      if (searchIn.value.trim()) return; // search results are showing instead
+      const active = data.filter((b) => b.status !== 'cancelled');
+      const bookings = active.filter((b) => b.type === 'booking');
+      const cancelled = data.length - active.length;
       const revenue = bookings.reduce((n, b) => n + b.amount, 0);
       const hours = bookings.reduce((n, b) => n + b.duration, 0) / 60;
       summary.replaceChildren(
@@ -1959,7 +2072,7 @@
         ...(cancelled ? [h('span', { text: `${cancelled} cancelled` })] : []));
       if (schedMode === 'grid') {
         box.replaceChildren(scheduleGrid({
-          date: schedDate, now, busy: live, staff: true,
+          date: schedDate, now, busy: active, staff: true,
           onFree: (court, start) => openStaffEditor({ init: { date: schedDate, court, start }, onSaved: () => load() }),
           onItem: (b) => openStaffDetail(b, () => load()),
         }));
@@ -1974,6 +2087,7 @@
 
     let searchTimer;
     let searchId = 0;
+    let quietSearch = false;
     searchIn.addEventListener('input', () => {
       clearTimeout(searchTimer);
       searchTimer = setTimeout(async () => {
@@ -1985,7 +2099,8 @@
           return;
         }
         dayControls.hidden = true;
-        box.replaceChildren(loading());
+        if (!quietSearch) box.replaceChildren(loading());
+        quietSearch = false;
         try {
           const r = await api(`/api/admin/bookings?type=booking&sort=desc&q=${encodeURIComponent(q)}`);
           if (id !== searchId) return;
@@ -1998,6 +2113,12 @@
     });
 
     await load();
+    // Refresh quietly when anyone changes a booking: the open day, or the search results.
+    live.handler = () => {
+      if (!searchIn.value.trim()) return load(true);
+      quietSearch = true;
+      searchIn.dispatchEvent(new Event('input'));
+    };
   }
 
   // =====================================================================================
@@ -2105,14 +2226,14 @@
     }
 
     let reqId = 0;
-    async function load() {
+    async function load(quiet) {
       const id = ++reqId;
       const qs = reportQuery(F);
-      results.replaceChildren(loading());
+      if (!quiet) results.replaceChildren(loading());
       try {
         const r = await api('/api/admin/reports?' + qs);
         if (id !== reqId) return;
-        shown = 50;
+        if (!quiet) shown = 50;
         drawScope(r, qs);
         drawResults(r);
       } catch (err) {
@@ -2241,6 +2362,7 @@
 
     buildFilters();
     await load();
+    live.handler = () => load(true); // keep figures current as bookings come in
   }
 
   // =====================================================================================
@@ -2499,7 +2621,6 @@
             cell({ ic: 'globe', c: 'tint', title: 'Open Booking Site', href: '#/book', chevron: true }),
             cell({ ic: 'logout', c: 'red', title: 'Sign Out', cls: 'danger', onClick: signOut }),
           ],
-          foot: `Data is stored in ${res.storage}.`,
         }));
     }
 
