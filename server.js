@@ -236,8 +236,10 @@ route('GET', '/api/public/availability', ({ query }) => {
 });
 
 route('POST', '/api/public/bookings', ({ req, body }) => {
-  rateLimit(req, 'book', 20, 3600000);
-  const b = B.createPublicBooking(state, body);
+  // Signed-in staff may use the public booking page for customers (and PLUS reserves).
+  const staff = isAdmin(req);
+  if (!staff) rateLimit(req, 'book', 20, 3600000);
+  const b = B.createPublicBooking(state, body, { staff });
   saveBooking(b, req, 'created');
   return B.playerView(state, b);
 });
@@ -264,11 +266,16 @@ route('POST', '/api/public/payment', ({ req, body }) => {
 
 // Staff sign-in -------------------------------------------------------------------------------------
 
-route('GET', '/api/admin/status', ({ req }) => ({
-  setupComplete: state.setupComplete,
-  needsPassword: !state.auth,
-  signedIn: isAdmin(req),
-}));
+route('GET', '/api/admin/status', ({ req }) => {
+  const signedIn = isAdmin(req);
+  return {
+    setupComplete: state.setupComplete,
+    needsPassword: !state.auth,
+    signedIn,
+    // Staff-only pricing, never sent to players.
+    plusRatePerHour: signedIn ? state.settings.plusRatePerHour : null,
+  };
+});
 
 route('POST', '/api/admin/setup', ({ req, res, body }) => {
   if (state.auth) throw U.bad('This club is already set up. Sign in instead.', 409);

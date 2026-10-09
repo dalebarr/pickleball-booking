@@ -90,6 +90,7 @@
     key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l8-8M16 7l2 2M14 9l2 2"/>',
     appearance: '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor"/>',
     external: '<path d="M14 4h6v6M20 4l-9 9M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/>',
+    star: '<path d="M12 3.6l2.6 5.3 5.8.85-4.2 4.1 1 5.8L12 16.9l-5.2 2.75 1-5.8-4.2-4.1 5.8-.85z"/>',
   };
   function icon(name, cls) {
     const span = document.createElement('span');
@@ -207,18 +208,23 @@
     return { normal, peak };
   }
 
-  /** Total = number of players × hours × rate per hour (peak rate inside peak time). */
-  function priceFor(start, duration, players) {
+  /**
+   * Total = number of players × hours × rate per hour (peak rate inside peak time).
+   * A PLUS reserve (staff only) uses the PLUS reserve rate for the whole booking.
+   */
+  function priceFor(start, duration, players, plus) {
+    if (plus) return Math.round(((ADMIN.plusRatePerHour * duration) / 60) * players * 100) / 100;
     const { normal, peak } = rateMinutes(start, duration);
     const perPlayer = (normal * CFG.pricePerHour + peak * CFG.peakPricePerHour) / 60;
     return Math.round(perPlayer * players * 100) / 100;
   }
 
   /** The same sum in words, e.g. "4 players × 2 hrs × $20.00/hr". */
-  function priceBreakdown(start, duration, players) {
+  function priceBreakdown(start, duration, players, plus) {
     const { normal, peak } = rateMinutes(start, duration);
     const who = `${players} player${players === 1 ? '' : 's'}`;
     const part = (min, rate) => `${fmt.dur(min)} × ${fmt.money(rate)}/hr`;
+    if (plus) return `${who} × ${part(duration, ADMIN.plusRatePerHour)} (PLUS reserve)`;
     if (!peak) return `${who} × ${part(normal, CFG.pricePerHour)}`;
     if (!normal) return `${who} × ${part(peak, CFG.peakPricePerHour)} (peak)`;
     return `${who} × (${part(normal, CFG.pricePerHour)} + ${part(peak, CFG.peakPricePerHour)} peak)`;
@@ -543,6 +549,9 @@
     return m ? h('span', { class: 'chip', 'data-c': m.c }, h('span', { class: 'dot' }), m.label) : null;
   };
 
+  /** Staff-only badge for bookings made at the PLUS reserve rate. */
+  const plusChip = (b) => (b.plus ? h('span', { class: 'chip', 'data-c': 'purple' }, icon('star'), 'PLUS') : null);
+
   function copyBtn(text, msg, label = 'Copy') {
     return h('button', { type: 'button', class: 'copy-btn', 'aria-label': `${label}: ${text}`, onclick: () => copyText(text, msg) }, icon('copy'), label);
   }
@@ -747,7 +756,7 @@
           type: 'button', class: 'item staff', 'data-c': st.c, style,
           'aria-label': `${b.name}, ${courtName(b.court)}, ${fmt.range(b.start, b.end)}, ${st.label}`,
           onclick: () => onItem(b),
-        }, h('span', { class: 'it-title', text: b.name }), h('span', { class: 'it-sub', text: `${fmt.range(b.start, b.end)} · ${st.label}` })));
+        }, h('span', { class: 'it-title', text: b.name }), h('span', { class: 'it-sub', text: `${b.plus ? 'PLUS · ' : ''}${fmt.range(b.start, b.end)} · ${st.label}` })));
       } else {
         grid.append(h('div', { class: 'item public', style, text: b.kind === 'blocked' ? 'Unavailable' : 'Booked' }));
       }
@@ -959,7 +968,8 @@
     window.onbeforeunload = null;
     try {
       await loadConfig();
-      if (def.area !== 'public') ADMIN = await api('/api/admin/status');
+      // Also on public pages: signed-in staff get staff-only options (PLUS reserve) there.
+      ADMIN = await api('/api/admin/status');
     } catch (err) {
       if (seq !== renderSeq) return;
       $('#main').replaceChildren(h('div', { class: 'content' }, emptyState('alert', 'Can’t reach the booking server', err.message,
@@ -1080,7 +1090,9 @@
       duration: CFG.durations.find((d) => fits(court, d)),
       method: methods[0] ? methods[0].value : 'venue',
       players: clamp(saved.players || Math.min(4, CFG.maxPlayers), 1, CFG.maxPlayers),
+      plus: false,
     };
+    const staff = ADMIN.signedIn; // staff booking for a customer: PLUS reserve is available
 
     const sh = openSheet({ title: 'Book a Court', guard: true });
     sh.setLeft(plainBtn('Cancel', sh.close));
@@ -1108,6 +1120,7 @@
       h('div', { class: 'summary-head' },
         h('h3', { text: dayLabel(date) === 'Today' || dayLabel(date) === 'Tomorrow' ? `${dayLabel(date)}, ${fmt.dateShort(date)}` : fmt.dayTitle(date) }),
         h('div', { class: 'meta' }, meta('clock', `Starts ${fmt.time(start)}`))),
+      staff ? plusReserveGroup(S.plus, (v) => { S.plus = v; refresh(); }, false) : null,
       CFG.courts.length > 1 ? group({ title: 'Court', items: [h('div', { class: 'seg-cell' }, courtSeg)] }) : null,
       group({ title: 'How long', items: [h('div', { class: 'seg-cell' }, durSeg)], foot: endNote }),
       group({
@@ -1132,10 +1145,10 @@
         durSeg.set(S.duration);
       }
       const end = startMin + S.duration;
-      const peak = CFG.peakEnabled && startMin < toMin(CFG.peakEnd) && end > toMin(CFG.peakStart);
+      const peak = !S.plus && CFG.peakEnabled && startMin < toMin(CFG.peakEnd) && end > toMin(CFG.peakStart);
       endNote.textContent = `Ends at ${fmt.time(toTime(end))}${peak ? ` · Peak rate of ${fmt.money(CFG.peakPricePerHour)} per player per hour applies from ${fmt.time(CFG.peakStart)}` : ''}`;
-      total.textContent = fmt.money(priceFor(startMin, S.duration, S.players));
-      breakdown.textContent = priceBreakdown(startMin, S.duration, S.players);
+      total.textContent = fmt.money(priceFor(startMin, S.duration, S.players, S.plus));
+      breakdown.textContent = priceBreakdown(startMin, S.duration, S.players, S.plus);
       methodNote.textContent = S.method === 'bank'
         ? `You’ll see the bank details on the next screen. ${CFG.autoCancelHours ? `Unpaid bookings are released after ${CFG.autoCancelHours} hour${CFG.autoCancelHours > 1 ? 's' : ''}.` : 'We hold your slot while we wait for your payment.'}`
         : 'Pay at the front desk before you play.';
@@ -1165,10 +1178,14 @@
           body: {
             date, court: S.court, start, duration: S.duration, players: S.players, paymentMethod: S.method,
             name: name.value.trim(), email: email.value.trim(), phone: phone.value.trim(), notes: notes.value.trim(),
+            plus: staff && S.plus,
           },
         });
-        prefs.set('player', { name: name.value.trim(), email: email.value.trim(), phone: phone.value.trim(), players: S.players });
-        rememberBooking(b.ref, b.email);
+        // A staff member booking for a customer shouldn't fill this device with the customer's details.
+        if (!staff) {
+          prefs.set('player', { name: name.value.trim(), email: email.value.trim(), phone: phone.value.trim(), players: S.players });
+          rememberBooking(b.ref, b.email);
+        }
         sh.guard = false;
         showPlayerBooking(sh, b, true);
         if (onBooked) onBooked(b);
@@ -1634,7 +1651,7 @@
       const head = h('div', { class: 'summary-head' },
         h('h3', { text: b.name }),
         h('div', { class: 'meta' }, h('span', { class: 'mono', text: b.ref }), h('span', { text: b.source === 'online' ? 'Booked online' : 'Added by staff' }), h('span', { text: fmt.stamp(b.createdAt) })),
-        h('div', { class: 'chips' }, chip(STATUS, b.status), b.type === 'booking' ? chip(PAY, b.paymentStatus) : null));
+        h('div', { class: 'chips' }, chip(STATUS, b.status), b.type === 'booking' ? chip(PAY, b.paymentStatus) : null, plusChip(b)));
       const whenGroup = group({
         title: 'When',
         items: [row('Date', fmt.dateLong(b.date)), row('Time', fmt.range(b.start, b.end)), row('Court', courtName(b.court)), row('Length', fmt.dur(b.duration))],
@@ -1655,6 +1672,7 @@
         nodes.push(group({ title: 'Player', items: contact }));
         const pay = [
           row('Amount', fmt.money(b.amount, b.currency), { strong: true, sub: `${b.players} player${b.players === 1 ? '' : 's'} × ${fmt.dur(b.duration)}` }),
+          row('Rate', b.plus ? 'PLUS reserve' : 'Regular'),
           row('Method', METHOD[b.paymentMethod]),
           row('Status', chip(PAY, b.paymentStatus)),
         ];
@@ -1693,6 +1711,20 @@
     renderBody();
   }
 
+  /** Staff-only "PLUS reserve" switch for the booking and block-time forms. */
+  function plusReserveGroup(on, onChange, isBlock) {
+    return group({
+      items: [cell({
+        ic: 'star', c: 'purple', title: 'PLUS reserve',
+        sub: `Special rate: ${fmt.money(ADMIN.plusRatePerHour || 0)} per player / hr`,
+        right: toggle(on, onChange, 'PLUS reserve'),
+      })],
+      foot: isBlock
+        ? 'Marks this blocked time as a PLUS reserve so it shows in PLUS reserve reports. Blocked time isn’t charged.'
+        : 'Charges the PLUS reserve rate instead of the regular and peak rates. Only staff see this option.',
+    });
+  }
+
   function openStaffEditor({ init = {}, existing = null, onSaved } = {}) {
     const isEdit = Boolean(existing);
     const e = existing || {};
@@ -1711,6 +1743,7 @@
       paymentStatus: e.paymentStatus && e.paymentStatus !== 'n/a' ? e.paymentStatus : 'unpaid',
       status: e.status && e.status !== 'blocked' ? e.status : 'confirmed',
       paymentReference: e.paymentReference || '',
+      plus: Boolean(e.plus),
     };
     let amountTouched = isEdit;
     const open = toMin(CFG.openTime);
@@ -1760,11 +1793,11 @@
     // The amount follows players × hours × rate until staff type their own amount.
     function syncPrice() {
       const s = toMin(S.start);
-      const byRate = priceFor(s, S.duration, S.players);
+      const byRate = priceFor(s, S.duration, S.players, S.plus);
       if (!amountTouched) amountIn.value = String(byRate);
       const differs = amountTouched && Math.abs(Number(amountIn.value || 0) - byRate) > 0.005;
       priceNote.replaceChildren(
-        h('span', { text: `${priceBreakdown(s, S.duration, S.players)} = ${fmt.money(byRate)}` }),
+        h('span', { text: `${priceBreakdown(s, S.duration, S.players, S.plus)} = ${fmt.money(byRate)}` }),
         differs ? h('button', { type: 'button', class: 'btn btn-plain btn-inline', text: 'Use This Amount', onclick: () => { amountTouched = false; syncPrice(); } }) : '');
     }
 
@@ -1795,6 +1828,7 @@
       if (!isEdit) {
         nodes.push(h('div', null, seg([{ value: 'booking', label: 'Booking' }, { value: 'block', label: 'Block time' }], S.type, (v) => { S.type = v; build(); }, 'Type')));
       }
+      nodes.push(plusReserveGroup(S.plus, (v) => { S.plus = v; syncPrice(); }, S.type === 'block'));
       nodes.push(group({
         title: 'When',
         items: [
@@ -1874,7 +1908,7 @@
       sub: [showDate ? fmt.date(b.date) : null, fmt.range(b.start, b.end), courtName(b.court), b.type === 'booking' ? b.ref : null].filter(Boolean).join(' · '),
       value: h('span', { style: { display: 'grid', justifyItems: 'end', gap: '4px' } },
         b.type === 'booking' ? h('span', { class: 'num', style: { color: 'var(--label)' }, text: fmt.money(b.amount, b.currency) }) : null,
-        h('span', { class: 'chips', style: { justifyContent: 'flex-end' } }, chip(STATUS, b.status), b.type === 'booking' && b.status !== 'cancelled' ? chip(PAY, b.paymentStatus) : null)),
+        h('span', { class: 'chips', style: { justifyContent: 'flex-end' } }, plusChip(b), chip(STATUS, b.status), b.type === 'booking' && b.status !== 'cancelled' ? chip(PAY, b.paymentStatus) : null)),
       chevron: true,
       onClick: () => openStaffDetail(b, onChanged),
     });
@@ -2133,7 +2167,7 @@
     ['', 'All statuses'], ['active', 'Active (not cancelled)'], ['pending', 'Pending payment'], ['confirmed', 'Confirmed'],
     ['completed', 'Checked in'], ['no_show', 'No-show'], ['cancelled', 'Cancelled'],
   ];
-  const REPORT_DEFAULTS = { period: 'month', court: '', status: '', payment: '', method: '', blocks: false, q: '', from: '', to: '', sort: 'asc' };
+  const REPORT_DEFAULTS = { period: 'month', court: '', status: '', payment: '', method: '', plus: '', blocks: false, q: '', from: '', to: '', sort: 'asc' };
 
   function periodRange(F) {
     const today = CFG.now.date;
@@ -2165,13 +2199,14 @@
     if (F.status) q.set('status', F.status === 'active' ? 'pending,confirmed,completed,no_show' : F.status);
     if (F.payment) q.set('payment', F.payment);
     if (F.method) q.set('method', F.method);
+    if (F.plus) q.set('plus', F.plus);
     q.set('type', F.blocks ? 'all' : 'booking');
     if (F.q) q.set('q', F.q);
     q.set('sort', F.sort);
     return q.toString();
   }
 
-  const activeFilterCount = (F) => [F.period !== 'all', F.court, F.status, F.payment, F.method, F.q].filter(Boolean).length;
+  const activeFilterCount = (F) => [F.period !== 'all', F.court, F.status, F.payment, F.method, F.plus, F.q].filter(Boolean).length;
 
   async function viewReports(main) {
     const F = { ...REPORT_DEFAULTS, ...prefs.get('reportFilters', {}) };
@@ -2208,6 +2243,7 @@
         field('Status', select(STATUS_FILTERS.map(([v, l]) => ({ value: v, label: l })), F.status, { onchange: on('status'), id: 'rf-status' })),
         field('Payment', select([['', 'Any payment'], ['unpaid', 'Unpaid'], ['submitted', 'To verify'], ['paid', 'Paid'], ['refunded', 'Refunded']].map(([v, l]) => ({ value: v, label: l })), F.payment, { onchange: on('payment'), id: 'rf-payment' })),
         field('Method', select([['', 'Any method'], ['bank', 'Bank transfer'], ['venue', 'Pay at venue']].map(([v, l]) => ({ value: v, label: l })), F.method, { onchange: on('method'), id: 'rf-method' })),
+        field('PLUS reserve', select([['', 'Any rate'], ['yes', 'PLUS reserve only'], ['no', 'Regular rate only']].map(([v, l]) => ({ value: v, label: l })), F.plus, { onchange: on('plus'), id: 'rf-plus' })),
         cell({ title: 'Include blocked time', right: toggle(F.blocks, (v) => { F.blocks = v; persist(); load(); }, 'Include blocked time', 'rf-blocks') }));
       let t;
       const searchIn = h('input', {
@@ -2313,7 +2349,7 @@
         },
         h('td', { class: 'nowrap', text: fmt.date(b.date) }), h('td', { class: 'nowrap', text: fmt.range(b.start, b.end) }), h('td', { class: 'nowrap', text: courtName(b.court) }),
         h('td', { text: b.name }), h('td', { class: 'r', text: b.type === 'booking' ? String(b.players) : '—' }),
-        h('td', null, chip(STATUS, b.status)), h('td', null, b.type === 'booking' ? chip(PAY, b.paymentStatus) : '—'),
+        h('td', null, h('span', { class: 'chips' }, chip(STATUS, b.status), plusChip(b))), h('td', null, b.type === 'booking' ? chip(PAY, b.paymentStatus) : '—'),
         h('td', { class: 'r', text: fmt.money(b.amount, b.currency) }), h('td', { class: 'mono nowrap', text: b.ref })))),
         h('tfoot', null, h('tr', null,
           h('td', { colspan: '4', text: `${fmt.num(sorted.length)} row${sorted.length === 1 ? '' : 's'}${sorted.length > shown ? `, showing ${shown}` : ''}` }),
@@ -2334,7 +2370,8 @@
             breakdownList('By payment', [
               ...r.byPayment.map((g) => ({ title: chip(PAY, g.key), g })),
               ...byMethod.map((g) => ({ title: g.label, g })),
-            ], cur))),
+            ], cur),
+            breakdownList('By rate', (r.byRate || []).map((g) => ({ title: g.key === 'plus' ? plusChip({ plus: true }) : 'Regular rate', g })), cur))),
         h('div', { class: 'cols c-1-1' },
           h('section', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', { class: 'card-title', text: 'Busiest start times' })), hbars(hoursItems)),
           h('section', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', { class: 'card-title', text: 'By day of week' })), hbars(dayItems))),
@@ -2502,7 +2539,13 @@
           field('Peak ends', timeSel('peakEnd', 30, 1440)),
           field(`Peak rate per player / hr (${D.currency})`, number('peakPricePerHour', { decimal: true })));
       }
-      return group({ title: 'Pricing', items, foot: 'Each booking costs: number of players × hours × rate per hour. Hours inside peak time use the peak rate. Changes apply to new bookings only.' });
+      return h('div', { class: 'stack' },
+        group({ title: 'Pricing', items, foot: 'Each booking costs: number of players × hours × rate per hour. Hours inside peak time use the peak rate. Changes apply to new bookings only.' }),
+        group({
+          title: 'PLUS reserve (staff only)',
+          items: [field(`PLUS rate per player / hr (${D.currency})`, number('plusRatePerHour', { decimal: true }))],
+          foot: 'A special rate staff can apply with the PLUS reserve switch when making a booking. It replaces the regular and peak rates for that booking: players × hours × PLUS rate. Players never see this option.',
+        }));
     }
 
     function paymentsSection() {
@@ -2666,6 +2709,7 @@
         D = JSON.parse(JSON.stringify(saved));
         changed();
         await loadConfig();
+        ADMIN = await api('/api/admin/status'); // picks up a new PLUS reserve rate
         shell('admin', '/admin/settings');
         buildAll();
         toast('Settings saved');
