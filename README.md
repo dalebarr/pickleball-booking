@@ -20,13 +20,17 @@ everything from a dashboard. It looks and feels like an iPhone app, and it works
   chart, a live "courts today" timeline, payments to verify, and upcoming bookings.
 - **Schedule**: day-by-day court grid or list. Add walk-in or phone bookings, block time for maintenance or clinics, and
   search every booking by name, email, phone or reference.
+- **Walk-in** (staff only): book customers who arrive at the desk, using the same court grid, details and rules as
+  online booking (offered lengths and start times, no past times, players per court, PLUS reserve). Staff can record
+  "Paid now" with a receipt number. Walk-ins are labelled in lists and can be filtered in reports.
 - **Booking actions**: confirm, mark paid or unpaid, check in, no-show, cancel, restore, refund, move or edit, with a history of changes.
 - **PLUS reserve** (staff only): a switch when booking or blocking time, including on the public booking page while a staff
   member is signed in. A PLUS reserve is charged players × hours × the PLUS reserve rate instead of the regular and peak
   rates. Players never see the switch, the rate or the label.
 - **Reports**: unfiltered ("All records") or filtered by period (today, this week, this month, last month, custom range and more),
-  court, status, payment status, payment method, PLUS reserve and text search. Shows totals, court use, value booked and collected,
-  outstanding money, a by-day/by-month chart, breakdowns by court, status, payment, busiest start times and day of week,
+  court, status, payment status, payment method, PLUS reserve, channel (online, walk-in, staff) and text search. Shows totals,
+  court use, value booked and collected, outstanding money, a by-day/by-month chart, breakdowns by court, status, payment,
+  rate, channel, busiest start times and day of week,
   plus the full booking list. **Export to CSV** (opens in Excel or Google Sheets) or **print**.
 - **Settings**:
   - **Number of courts**: minimum 1, maximum 3, with a name for each court.

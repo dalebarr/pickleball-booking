@@ -41,6 +41,7 @@
   --red: #FF3B30;
   --indigo: #5856D6;
   --purple: #AF52DE;
+  --teal: #2A9BB0;
   --gray: #8E8E93;
   --red-text: #D70015;
 
@@ -90,6 +91,7 @@
     --red: #FF453A;
     --indigo: #5E5CE6;
     --purple: #BF5AF2;
+    --teal: #40C8E0;
     --gray: #8E8E93;
     --red-text: #FF6961;
     --shadow-pop: 0 10px 30px rgba(0, 0, 0, 0.5);
@@ -131,6 +133,7 @@
   --red: #FF453A;
   --indigo: #5E5CE6;
   --purple: #BF5AF2;
+  --teal: #40C8E0;
   --gray: #8E8E93;
   --red-text: #FF6961;
   --shadow-pop: 0 10px 30px rgba(0, 0, 0, 0.5);
@@ -323,6 +326,7 @@ button.cell:focus-visible, a.cell:focus-visible { outline-offset: -3px; }
 .cell-icon[data-c="red"] { background: var(--red); }
 .cell-icon[data-c="indigo"] { background: var(--indigo); }
 .cell-icon[data-c="purple"] { background: var(--purple); }
+.cell-icon[data-c="teal"] { background: var(--teal); }
 .cell-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .cell-title { overflow-wrap: anywhere; }
 .cell-sub { font-size: 13.5px; color: var(--label-2); overflow-wrap: anywhere; }
@@ -446,6 +450,7 @@ button.cell:focus-visible, a.cell:focus-visible { outline-offset: -3px; }
 .chip[data-c="blue"] { --c: var(--blue); background: color-mix(in srgb, var(--blue) 13%, transparent); }
 .chip[data-c="indigo"] { --c: var(--indigo); background: color-mix(in srgb, var(--indigo) 14%, transparent); }
 .chip[data-c="purple"] { --c: var(--purple); background: color-mix(in srgb, var(--purple) 15%, transparent); }
+.chip[data-c="teal"] { --c: var(--teal); background: color-mix(in srgb, var(--teal) 15%, transparent); }
 .chip .ico { width: 12px; height: 12px; color: var(--c, var(--gray)); }
 .chip[data-c="gray"] { --c: var(--gray); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }

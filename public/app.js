@@ -91,6 +91,7 @@
     appearance: '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor"/>',
     external: '<path d="M14 4h6v6M20 4l-9 9M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/>',
     star: '<path d="M12 3.6l2.6 5.3 5.8.85-4.2 4.1 1 5.8L12 16.9l-5.2 2.75 1-5.8-4.2-4.1 5.8-.85z"/>',
+    walkin: '<circle cx="9.5" cy="7.5" r="3.2"/><path d="M3.5 19.5a6 6 0 0 1 12 0M18.5 8.5v6M15.5 11.5h6"/>',
   };
   function icon(name, cls) {
     const span = document.createElement('span');
@@ -316,7 +317,7 @@
   const live = { es: null, handler: null, debounce: null, retry: null };
 
   const LIVE_TOASTS = {
-    created: (e) => `New booking: ${e.name}, ${courtName(e.court)}, ${dayLabel(e.date)} at ${fmt.time(e.start)}`,
+    created: (e) => `${e.source === 'walkin' ? 'New walk-in' : 'New booking'}: ${e.name}, ${courtName(e.court)}, ${dayLabel(e.date)} at ${fmt.time(e.start)}`,
     payment: (e) => `${e.name} sent payment details (${e.ref})`,
     cancelled: (e) => `${e.name} cancelled ${e.ref}`,
   };
@@ -551,6 +552,9 @@
 
   /** Staff-only badge for bookings made at the PLUS reserve rate. */
   const plusChip = (b) => (b.plus ? h('span', { class: 'chip', 'data-c': 'purple' }, icon('star'), 'PLUS') : null);
+  /** Staff-only badge for customers booked in person at the desk. */
+  const walkInChip = (b) => (b.source === 'walkin' ? h('span', { class: 'chip', 'data-c': 'teal' }, icon('walkin'), 'Walk-in') : null);
+  const SOURCE_TEXT = { online: 'Booked online', staff: 'Added by staff', walkin: 'Walk-in at the desk' };
 
   function copyBtn(text, msg, label = 'Copy') {
     return h('button', { type: 'button', class: 'copy-btn', 'aria-label': `${label}: ${text}`, onclick: () => copyText(text, msg) }, icon('copy'), label);
@@ -756,7 +760,7 @@
           type: 'button', class: 'item staff', 'data-c': st.c, style,
           'aria-label': `${b.name}, ${courtName(b.court)}, ${fmt.range(b.start, b.end)}, ${st.label}`,
           onclick: () => onItem(b),
-        }, h('span', { class: 'it-title', text: b.name }), h('span', { class: 'it-sub', text: `${b.plus ? 'PLUS · ' : ''}${fmt.range(b.start, b.end)} · ${st.label}` })));
+        }, h('span', { class: 'it-title', text: b.name }), h('span', { class: 'it-sub', text: `${b.source === 'walkin' ? 'Walk-in · ' : ''}${b.plus ? 'PLUS · ' : ''}${fmt.range(b.start, b.end)} · ${st.label}` })));
       } else {
         grid.append(h('div', { class: 'item public', style, text: b.kind === 'blocked' ? 'Unavailable' : 'Booked' }));
       }
@@ -914,6 +918,7 @@
     '/info': { view: viewInfo, area: 'public' },
     '/admin': { view: viewDashboard, area: 'admin' },
     '/admin/schedule': { view: viewSchedule, area: 'admin' },
+    '/admin/walkin': { view: viewWalkIn, area: 'admin' },
     '/admin/reports': { view: viewReports, area: 'admin' },
     '/admin/settings': { view: viewSettings, area: 'admin' },
     '/admin/login': { view: viewLogin, area: 'auth' },
@@ -921,7 +926,7 @@
   };
   const NAV = {
     public: [['/book', 'Book', 'calendar'], ['/my', 'My Bookings', 'ticket'], ['/info', 'Club Info', 'info']],
-    admin: [['/admin', 'Dashboard', 'grid'], ['/admin/schedule', 'Schedule', 'schedule'], ['/admin/reports', 'Reports', 'chart'], ['/admin/settings', 'Settings', 'sliders']],
+    admin: [['/admin', 'Dashboard', 'grid'], ['/admin/schedule', 'Schedule', 'schedule'], ['/admin/walkin', 'Walk-in', 'walkin'], ['/admin/reports', 'Reports', 'chart'], ['/admin/settings', 'Settings', 'sliders']],
   };
 
   function shell(area, path) {
@@ -1018,27 +1023,38 @@
   // Player: Book
   // =====================================================================================
 
-  let bookDate = null;
+  const bookDates = { online: null, walkin: null };
 
-  async function viewBook(main) {
-    const pg = page(main, { title: 'Book a Court' });
+  // Declared as functions (hoisted) because the route table above refers to them.
+  function viewBook(main) { return courtBookingPage(main, { walkIn: false }); }
+  function viewWalkIn(main) { return courtBookingPage(main, { walkIn: true }); }
+
+  /**
+   * The court grid for booking. Players use it online; signed-in staff use the
+   * walk-in version for customers at the desk (same rules and fields).
+   */
+  async function courtBookingPage(main, { walkIn }) {
+    const pg = page(main, { title: walkIn ? 'Walk-in' : 'Book a Court' });
     if (!CFG.setupComplete) {
       pg.content.append(emptyState('calendar', 'Online booking opens soon', 'This club is still setting up its courts. Please check back shortly.'));
       return;
     }
     pg.setSubtitle(
+      walkIn ? meta('walkin', 'Book a court for a customer at the desk') : null,
       meta('clock', `Open ${fmt.range(CFG.openTime, CFG.closeTime)}`),
       meta('court', `${CFG.courts.length} court${CFG.courts.length > 1 ? 's' : ''}`),
       meta('tag', `${fmt.money(CFG.pricePerHour)} per player per hour`));
-    if (CFG.announcement) pg.content.append(banner('megaphone', CFG.announcement));
+    if (CFG.announcement && !walkIn) pg.content.append(banner('megaphone', CFG.announcement));
 
+    const key = walkIn ? 'walkin' : 'online';
     const today = CFG.now.date;
     const last = addDays(today, CFG.advanceDays);
-    if (!bookDate || bookDate < today || bookDate > last) bookDate = today;
+    if (!bookDates[key] || bookDates[key] < today || bookDates[key] > last) bookDates[key] = today;
+    const pick = (d) => { bookDates[key] = d; load(); };
 
     const title = h('h2', { class: 'datebar-title' });
-    const strip = dateStrip({ from: today, to: addDays(today, Math.min(CFG.advanceDays, 90)), value: bookDate, onPick: (d) => { bookDate = d; load(); } });
-    const picker = datePicker({ value: bookDate, min: today, max: last, onPick: (d) => { bookDate = d; load(); } });
+    const strip = dateStrip({ from: today, to: addDays(today, Math.min(CFG.advanceDays, 90)), value: bookDates[key], onPick: pick });
+    const picker = datePicker({ value: bookDates[key], min: today, max: last, onPick: pick });
     const gridBox = h('div', null, loading());
     pg.content.append(
       h('section', { class: 'datebar', 'aria-label': 'Date' }, h('div', { class: 'datebar-row' }, title, picker), strip),
@@ -1048,12 +1064,17 @@
           h('span', null, h('i', { class: 'l-booked' }), 'Booked'),
           h('span', null, h('i', { class: 'l-closed' }), 'Not available')),
         gridBox,
-        h('p', { class: 'group-foot', style: { padding: '0 4px' }, text: `Tap an open slot to book. Total = number of players × hours × ${fmt.money(CFG.pricePerHour)} per hour. Up to ${CFG.maxPlayers} players per court.` })));
+        h('p', {
+          class: 'group-foot', style: { padding: '0 4px' },
+          text: walkIn
+            ? `Tap an open slot to book a walk-in customer. The same rules as online booking apply: the next open start time, offered lengths and up to ${CFG.maxPlayers} players per court.`
+            : `Tap an open slot to book. Total = number of players × hours × ${fmt.money(CFG.pricePerHour)} per hour. Up to ${CFG.maxPlayers} players per court.`,
+        })));
 
     let reqId = 0;
     async function load(quiet) {
       const id = ++reqId;
-      const date = bookDate;
+      const date = bookDates[key];
       title.textContent = dayLabel(date);
       strip.set(date);
       picker.set(date);
@@ -1063,38 +1084,48 @@
         if (id !== reqId) return;
         gridBox.replaceChildren(scheduleGrid({
           date, now: av.now, busy: av.busy, staff: false,
-          onFree: (court, start) => openBookSheet({ date, court, start, busy: av.busy, onBooked: () => load(true) }),
+          onFree: (court, start) => openBookSheet({ date, court, start, busy: av.busy, walkIn, onBooked: () => load(true) }),
         }));
       } catch (err) {
         if (id !== reqId) return;
+        if (err.status === 401) return handleError(err);
         gridBox.replaceChildren(emptyState('alert', 'Couldn’t load courts', err.message, h('button', { type: 'button', class: 'btn btn-tinted', text: 'Try Again', onclick: () => load() })));
       }
     }
     await load();
+    if (walkIn) live.handler = () => load(true); // show other people's bookings straight away
     const timer = setInterval(() => {
       if (!gridBox.isConnected) return clearInterval(timer);
       if (!document.hidden && !layers.length) load(true);
     }, 60000);
   }
 
-  function openBookSheet({ date, court, start, busy, onBooked }) {
+  function openBookSheet({ date, court, start, busy, onBooked, walkIn = false }) {
     const close = toMin(CFG.closeTime);
     const startMin = toMin(start);
-    const saved = prefs.get('player', {});
+    const staff = ADMIN.signedIn; // staff booking for a customer: PLUS reserve is available
+    // Staff book for customers, so the form never fills in details saved on this device.
+    const saved = staff ? {} : prefs.get('player', {});
     const fits = (c, d) => startMin + d <= close && !busy.some((b) => b.court === c && toMin(b.start) < startMin + d && toMin(b.end) > startMin);
     const methods = [];
-    if (CFG.payment.bankTransfer) methods.push({ value: 'bank', label: 'Bank transfer' });
-    if (CFG.payment.payAtVenue) methods.push({ value: 'venue', label: 'Pay at venue' });
+    if (walkIn) {
+      methods.push({ value: 'venue', label: 'Pay at desk' });
+      if (CFG.payment.bankTransfer) methods.push({ value: 'bank', label: 'Bank transfer' });
+    } else {
+      if (CFG.payment.bankTransfer) methods.push({ value: 'bank', label: 'Bank transfer' });
+      if (CFG.payment.payAtVenue) methods.push({ value: 'venue', label: 'Pay at venue' });
+    }
     const S = {
       court,
       duration: CFG.durations.find((d) => fits(court, d)),
       method: methods[0] ? methods[0].value : 'venue',
       players: clamp(saved.players || Math.min(4, CFG.maxPlayers), 1, CFG.maxPlayers),
       plus: false,
+      paid: walkIn, // walk-ins usually pay at the desk straight away
     };
-    const staff = ADMIN.signedIn; // staff booking for a customer: PLUS reserve is available
+    const who = walkIn ? 'the customer’s' : 'your';
 
-    const sh = openSheet({ title: 'Book a Court', guard: true });
+    const sh = openSheet({ title: walkIn ? 'Walk-in Booking' : 'Book a Court', guard: true });
     sh.setLeft(plainBtn('Cancel', sh.close));
 
     const errBox = h('div');
@@ -1103,16 +1134,22 @@
     const durSeg = seg(CFG.durations.map((d) => ({ value: d, label: fmt.dur(d) })), S.duration, (v) => { S.duration = v; refresh(); }, 'Booking length');
     const endNote = h('p', { class: 'group-foot' });
     const name = h('input', { autocomplete: 'name', maxlength: 80, placeholder: 'Required', value: saved.name || '' });
-    const email = h('input', { type: 'email', autocomplete: 'email', inputmode: 'email', maxlength: 120, placeholder: 'you@example.com', value: saved.email || '' });
+    const email = h('input', { type: 'email', autocomplete: walkIn ? 'off' : 'email', inputmode: 'email', maxlength: 120, placeholder: walkIn ? 'customer@example.com' : 'you@example.com', value: saved.email || '' });
     const phone = h('input', { type: 'tel', autocomplete: 'tel', inputmode: 'tel', maxlength: 30, placeholder: 'Required', value: saved.phone || '' });
     const players = stepper({ value: S.players, min: 1, max: CFG.maxPlayers, label: 'Players', onChange: (v) => { S.players = v; refresh(); } });
     const notes = h('textarea', { maxlength: 300, placeholder: 'Anything the club should know (optional)', 'aria-label': 'Notes' });
     const methodSeg = methods.length > 1 ? seg(methods, S.method, (v) => { S.method = v; refresh(); }, 'Payment method') : null;
     const methodNote = h('p', { class: 'group-foot' });
+    const receipt = h('input', { maxlength: 60, placeholder: 'Optional', autocomplete: 'off' });
+    const receiptField = field('Receipt no.', receipt);
+    const paidRow = walkIn
+      ? cell({ title: 'Paid now', sub: 'The customer has paid at the desk', right: toggle(S.paid, (v) => { S.paid = v; refresh(); }, 'Paid now') })
+      : null;
     const total = h('strong');
     const breakdown = h('span', { class: 'breakdown' });
     const formId = 'book-form-' + ++uid;
-    const submit = h('button', { type: 'submit', form: formId, class: 'btn btn-filled btn-lg', text: 'Confirm Booking' });
+    const submitLabel = walkIn ? 'Book Walk-in' : 'Confirm Booking';
+    const submit = h('button', { type: 'submit', form: formId, class: 'btn btn-filled btn-lg', text: submitLabel });
 
     const fields = { name, email, phone };
     const form = h('form', { id: formId, novalidate: true, class: 'stack', onsubmit: onSubmit },
@@ -1124,15 +1161,21 @@
       CFG.courts.length > 1 ? group({ title: 'Court', items: [h('div', { class: 'seg-cell' }, courtSeg)] }) : null,
       group({ title: 'How long', items: [h('div', { class: 'seg-cell' }, durSeg)], foot: endNote }),
       group({
-        title: 'Your details',
+        title: walkIn ? 'Customer details' : 'Your details',
         items: [field('Name', name), field('Email', email), field('Mobile', phone), cell({ title: 'Players', value: players.valueEl, right: players })],
-        foot: 'The club uses these to find your booking and to reach you if plans change.',
+        foot: walkIn
+          ? 'Used to find the booking and to reach the customer if plans change.'
+          : 'The club uses these to find your booking and to reach you if plans change.',
       }),
       group({ title: 'Notes', items: [field(null, notes, { stack: true })] }),
       methods.length
-        ? group({ title: 'Payment', items: [methodSeg ? h('div', { class: 'seg-cell' }, methodSeg) : row(methods[0].label, null)], foot: methodNote })
+        ? group({
+          title: 'Payment',
+          items: [methodSeg ? h('div', { class: 'seg-cell' }, methodSeg) : row(methods[0].label, null), paidRow, walkIn ? receiptField : null],
+          foot: methodNote,
+        })
         : banner('alert', 'This club has not turned on any payment options yet. Contact the club to book.', 'warn'),
-      h('p', { class: 'group-foot', style: { padding: '0 4px' }, text: cancelPolicyText() }));
+      walkIn ? null : h('p', { class: 'group-foot', style: { padding: '0 4px' }, text: cancelPolicyText() }));
 
     sh.setBody(form);
     sh.setFoot(h('div', { class: 'total' }, h('span', null, 'Total', breakdown), total), submit);
@@ -1149,6 +1192,15 @@
       endNote.textContent = `Ends at ${fmt.time(toTime(end))}${peak ? ` · Peak rate of ${fmt.money(CFG.peakPricePerHour)} per player per hour applies from ${fmt.time(CFG.peakStart)}` : ''}`;
       total.textContent = fmt.money(priceFor(startMin, S.duration, S.players, S.plus));
       breakdown.textContent = priceBreakdown(startMin, S.duration, S.players, S.plus);
+      if (walkIn) {
+        receiptField.hidden = !S.paid;
+        methodNote.textContent = S.paid
+          ? `Recorded as paid${S.method === 'bank' ? ' by bank transfer' : ' at the desk'}. Add the receipt or transaction number if you have one.`
+          : S.method === 'bank'
+            ? 'The customer sees the bank details on the next screen. The booking stays pending until you mark it paid.'
+            : 'The customer pays at the desk before playing.';
+        return;
+      }
       methodNote.textContent = S.method === 'bank'
         ? `You’ll see the bank details on the next screen. ${CFG.autoCancelHours ? `Unpaid bookings are released after ${CFG.autoCancelHours} hour${CFG.autoCancelHours > 1 ? 's' : ''}.` : 'We hold your slot while we wait for your payment.'}`
         : 'Pay at the front desk before you play.';
@@ -1160,7 +1212,7 @@
       errBox.replaceChildren();
       Object.values(fields).forEach((f) => f.parentElement.classList.remove('invalid'));
       const problems = [];
-      if (!name.value.trim()) problems.push([name, 'Enter your name.']);
+      if (!name.value.trim()) problems.push([name, `Enter ${who} name.`]);
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value.trim())) problems.push([email, 'Enter a valid email address.']);
       if (!/^[+()\d\s.-]{6,30}$/.test(phone.value.trim())) problems.push([phone, 'Enter a valid mobile number.']);
       if (problems.length) {
@@ -1172,28 +1224,34 @@
       }
       submit.disabled = true;
       submit.textContent = 'Booking…';
+      const body = {
+        date, court: S.court, start, duration: S.duration, players: S.players, paymentMethod: S.method,
+        name: name.value.trim(), email: email.value.trim(), phone: phone.value.trim(), notes: notes.value.trim(),
+        plus: staff && S.plus,
+      };
       try {
-        const b = await api('/api/public/bookings', {
-          method: 'POST',
-          body: {
-            date, court: S.court, start, duration: S.duration, players: S.players, paymentMethod: S.method,
-            name: name.value.trim(), email: email.value.trim(), phone: phone.value.trim(), notes: notes.value.trim(),
-            plus: staff && S.plus,
-          },
-        });
+        let b;
+        if (walkIn) {
+          const res = await api('/api/admin/walkins', { method: 'POST', body: { ...body, paid: S.paid, paymentReference: S.paid ? receipt.value.trim() : '' } });
+          b = res.view;
+          toast('Walk-in booked');
+        } else {
+          b = await api('/api/public/bookings', { method: 'POST', body });
+        }
         // A staff member booking for a customer shouldn't fill this device with the customer's details.
         if (!staff) {
           prefs.set('player', { name: name.value.trim(), email: email.value.trim(), phone: phone.value.trim(), players: S.players });
           rememberBooking(b.ref, b.email);
         }
         sh.guard = false;
-        showPlayerBooking(sh, b, true);
+        showPlayerBooking(sh, b, true, walkIn ? 'Walk-in Booked' : null);
         if (onBooked) onBooked(b);
       } catch (err) {
+        if (err.status === 401) return handleError(err);
         errBox.replaceChildren(banner('alert', err.message, 'error'));
         sh.body.scrollTop = 0;
         submit.disabled = false;
-        submit.textContent = 'Confirm Booking';
+        submit.textContent = submitLabel;
         if (err.status === 409 && onBooked) onBooked();
       }
     }
@@ -1215,8 +1273,8 @@
     prefs.set('mine', prefs.get('mine', []).filter((m) => m.ref !== ref));
   }
 
-  function showPlayerBooking(sh, b, justBooked) {
-    sh.setTitle(justBooked ? 'Booking Complete' : 'Your Booking');
+  function showPlayerBooking(sh, b, justBooked, title) {
+    sh.setTitle(title || (justBooked ? 'Booking Complete' : 'Your Booking'));
     sh.setLeft();
     sh.setRight(plainBtn('Done', sh.close, true));
     sh.setFoot();
@@ -1650,8 +1708,8 @@
       const when = `${fmt.date(b.date)}, ${fmt.range(b.start, b.end)} on ${courtName(b.court)}`;
       const head = h('div', { class: 'summary-head' },
         h('h3', { text: b.name }),
-        h('div', { class: 'meta' }, h('span', { class: 'mono', text: b.ref }), h('span', { text: b.source === 'online' ? 'Booked online' : 'Added by staff' }), h('span', { text: fmt.stamp(b.createdAt) })),
-        h('div', { class: 'chips' }, chip(STATUS, b.status), b.type === 'booking' ? chip(PAY, b.paymentStatus) : null, plusChip(b)));
+        h('div', { class: 'meta' }, h('span', { class: 'mono', text: b.ref }), h('span', { text: SOURCE_TEXT[b.source] || SOURCE_TEXT.online }), h('span', { text: fmt.stamp(b.createdAt) })),
+        h('div', { class: 'chips' }, chip(STATUS, b.status), b.type === 'booking' ? chip(PAY, b.paymentStatus) : null, plusChip(b), walkInChip(b)));
       const whenGroup = group({
         title: 'When',
         items: [row('Date', fmt.dateLong(b.date)), row('Time', fmt.range(b.start, b.end)), row('Court', courtName(b.court)), row('Length', fmt.dur(b.duration))],
@@ -1908,7 +1966,7 @@
       sub: [showDate ? fmt.date(b.date) : null, fmt.range(b.start, b.end), courtName(b.court), b.type === 'booking' ? b.ref : null].filter(Boolean).join(' · '),
       value: h('span', { style: { display: 'grid', justifyItems: 'end', gap: '4px' } },
         b.type === 'booking' ? h('span', { class: 'num', style: { color: 'var(--label)' }, text: fmt.money(b.amount, b.currency) }) : null,
-        h('span', { class: 'chips', style: { justifyContent: 'flex-end' } }, plusChip(b), chip(STATUS, b.status), b.type === 'booking' && b.status !== 'cancelled' ? chip(PAY, b.paymentStatus) : null)),
+        h('span', { class: 'chips', style: { justifyContent: 'flex-end' } }, walkInChip(b), plusChip(b), chip(STATUS, b.status), b.type === 'booking' && b.status !== 'cancelled' ? chip(PAY, b.paymentStatus) : null)),
       chevron: true,
       onClick: () => openStaffDetail(b, onChanged),
     });
@@ -1947,7 +2005,8 @@
 
       const monthName = fmt.month(d.month.key);
       const tiles = h('div', { class: 'tiles t4' },
-        tile('calendar', 'Bookings today', fmt.num(d.today.bookings), `${fmt.num(d.today.players)} players · ${fmt.money(d.today.revenue)}`),
+        tile('calendar', 'Bookings today', fmt.num(d.today.bookings),
+          `${fmt.num(d.today.players)} players · ${fmt.money(d.today.revenue)}${d.today.walkIns ? ` · ${d.today.walkIns} walk-in${d.today.walkIns === 1 ? '' : 's'}` : ''}`),
         tile('court', 'Court use today', fmt.pct(d.today.utilization), `Across ${CFG.courts.length} court${CFG.courts.length > 1 ? 's' : ''}`, h('div', { class: 'meter', role: 'presentation' }, h('span', { style: { width: fmt.pct(d.today.utilization) } }))),
         tile('cash', `Collected in ${fmt.monthShort(d.month.key)}`, fmt.money(d.month.collected), `${fmt.money(d.month.billed)} booked in ${monthName}`),
         tile('alert', 'Payments to check', fmt.num(d.payments.toVerify), `${fmt.num(d.payments.unpaidUpcoming)} upcoming unpaid · ${fmt.money(d.payments.unpaidAmount)}`, null, d.payments.toVerify > 0));
@@ -2167,7 +2226,8 @@
     ['', 'All statuses'], ['active', 'Active (not cancelled)'], ['pending', 'Pending payment'], ['confirmed', 'Confirmed'],
     ['completed', 'Checked in'], ['no_show', 'No-show'], ['cancelled', 'Cancelled'],
   ];
-  const REPORT_DEFAULTS = { period: 'month', court: '', status: '', payment: '', method: '', plus: '', blocks: false, q: '', from: '', to: '', sort: 'asc' };
+  const REPORT_DEFAULTS = { period: 'month', court: '', status: '', payment: '', method: '', plus: '', source: '', blocks: false, q: '', from: '', to: '', sort: 'asc' };
+  const SOURCE_FILTERS = [['', 'Any channel'], ['online', 'Online (players)'], ['walkin', 'Walk-in'], ['staff', 'Staff (phone or desk)']];
 
   function periodRange(F) {
     const today = CFG.now.date;
@@ -2200,13 +2260,14 @@
     if (F.payment) q.set('payment', F.payment);
     if (F.method) q.set('method', F.method);
     if (F.plus) q.set('plus', F.plus);
+    if (F.source) q.set('source', F.source);
     q.set('type', F.blocks ? 'all' : 'booking');
     if (F.q) q.set('q', F.q);
     q.set('sort', F.sort);
     return q.toString();
   }
 
-  const activeFilterCount = (F) => [F.period !== 'all', F.court, F.status, F.payment, F.method, F.plus, F.q].filter(Boolean).length;
+  const activeFilterCount = (F) => [F.period !== 'all', F.court, F.status, F.payment, F.method, F.plus, F.source, F.q].filter(Boolean).length;
 
   async function viewReports(main) {
     const F = { ...REPORT_DEFAULTS, ...prefs.get('reportFilters', {}) };
@@ -2244,6 +2305,7 @@
         field('Payment', select([['', 'Any payment'], ['unpaid', 'Unpaid'], ['submitted', 'To verify'], ['paid', 'Paid'], ['refunded', 'Refunded']].map(([v, l]) => ({ value: v, label: l })), F.payment, { onchange: on('payment'), id: 'rf-payment' })),
         field('Method', select([['', 'Any method'], ['bank', 'Bank transfer'], ['venue', 'Pay at venue']].map(([v, l]) => ({ value: v, label: l })), F.method, { onchange: on('method'), id: 'rf-method' })),
         field('PLUS reserve', select([['', 'Any rate'], ['yes', 'PLUS reserve only'], ['no', 'Regular rate only']].map(([v, l]) => ({ value: v, label: l })), F.plus, { onchange: on('plus'), id: 'rf-plus' })),
+        field('Channel', select(SOURCE_FILTERS.map(([v, l]) => ({ value: v, label: l })), F.source, { onchange: on('source'), id: 'rf-source' })),
         cell({ title: 'Include blocked time', right: toggle(F.blocks, (v) => { F.blocks = v; persist(); load(); }, 'Include blocked time', 'rf-blocks') }));
       let t;
       const searchIn = h('input', {
@@ -2349,7 +2411,7 @@
         },
         h('td', { class: 'nowrap', text: fmt.date(b.date) }), h('td', { class: 'nowrap', text: fmt.range(b.start, b.end) }), h('td', { class: 'nowrap', text: courtName(b.court) }),
         h('td', { text: b.name }), h('td', { class: 'r', text: b.type === 'booking' ? String(b.players) : '—' }),
-        h('td', null, h('span', { class: 'chips' }, chip(STATUS, b.status), plusChip(b))), h('td', null, b.type === 'booking' ? chip(PAY, b.paymentStatus) : '—'),
+        h('td', null, h('span', { class: 'chips' }, chip(STATUS, b.status), plusChip(b), walkInChip(b))), h('td', null, b.type === 'booking' ? chip(PAY, b.paymentStatus) : '—'),
         h('td', { class: 'r', text: fmt.money(b.amount, b.currency) }), h('td', { class: 'mono nowrap', text: b.ref })))),
         h('tfoot', null, h('tr', null,
           h('td', { colspan: '4', text: `${fmt.num(sorted.length)} row${sorted.length === 1 ? '' : 's'}${sorted.length > shown ? `, showing ${shown}` : ''}` }),
@@ -2371,7 +2433,11 @@
               ...r.byPayment.map((g) => ({ title: chip(PAY, g.key), g })),
               ...byMethod.map((g) => ({ title: g.label, g })),
             ], cur),
-            breakdownList('By rate', (r.byRate || []).map((g) => ({ title: g.key === 'plus' ? plusChip({ plus: true }) : 'Regular rate', g })), cur))),
+            breakdownList('By rate', (r.byRate || []).map((g) => ({ title: g.key === 'plus' ? plusChip({ plus: true }) : 'Regular rate', g })), cur),
+            breakdownList('By channel', (r.bySource || []).map((g) => ({
+              title: g.key === 'walkin' ? walkInChip({ source: 'walkin' }) : (SOURCE_FILTERS.find(([v]) => v === g.key) || [g.key, g.key])[1],
+              g,
+            })), cur))),
         h('div', { class: 'cols c-1-1' },
           h('section', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', { class: 'card-title', text: 'Busiest start times' })), hbars(hoursItems)),
           h('section', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', { class: 'card-title', text: 'By day of week' })), hbars(dayItems))),

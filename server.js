@@ -51,7 +51,7 @@ function saveBooking(b, req, action) {
   backend.saveBooking(state, b);
   broadcast({
     kind: 'booking', action, by: clientId(req),
-    id: b.id, ref: b.ref, type: b.type, name: b.name, date: b.date, start: b.start, court: b.court,
+    id: b.id, ref: b.ref, type: b.type, source: b.source, name: b.name, date: b.date, start: b.start, court: b.court,
   });
 }
 
@@ -363,6 +363,13 @@ route('GET', '/api/admin/bookings', ({ query }) => {
   sweep();
   const f = R.parseFilters({ type: 'all', ...query });
   return { bookings: R.applyFilters(state.bookings, f), now: U.nowIn(state.settings.timezone) };
+}, { admin: true });
+
+// Walk-in customers booked at the desk: online booking rules, staff only.
+route('POST', '/api/admin/walkins', ({ req, body }) => {
+  const b = B.createPublicBooking(state, body, { walkIn: true });
+  saveBooking(b, req, 'created');
+  return { booking: b, view: B.playerView(state, b) };
 }, { admin: true });
 
 route('POST', '/api/admin/bookings', ({ req, body }) => {
