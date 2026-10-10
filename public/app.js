@@ -569,6 +569,8 @@
     return h('div', { class: 'empty' }, icon(ic), h('h3', { text: title }), text ? h('p', { text }) : null, action);
   }
 
+  const closedBanner = (date, name) => banner('flag', [h('strong', { text: `Closed for ${name}` }), h('span', { text: `The club is closed on ${fmt.dateLong(date)}. Choose another day.` })], 'warn');
+
   const loading = () => h('div', { class: 'loading' }, h('span', { class: 'spinner', role: 'status', 'aria-label': 'Loading' }));
 
   function iconBtn(ic, label, onClick) {
@@ -677,17 +679,22 @@
 
   // ---- Date strip and picker --------------------------------------------------------------
 
+  /** The holiday or special closure on a date, if the club is closed then. */
+  const closedOn = (d) => (CFG.closedDates || []).find((c) => c.date === d) || null;
+
   function dateStrip({ from, to, value, onPick }) {
     const today = CFG.now.date;
     const el = h('div', { class: 'datestrip', role: 'group', 'aria-label': 'Choose a day' });
     const btns = new Map();
     for (let d = from, i = 0; d <= to && i < 140; d = addDays(d, 1), i += 1) {
       const first = i === 0 || d.endsWith('-01');
+      const closed = closedOn(d);
       const b = h('button', {
         type: 'button',
-        class: 'day' + (d === today ? ' today' : '') + (d < today ? ' past' : ''),
+        class: 'day' + (d === today ? ' today' : '') + (d < today ? ' past' : '') + (closed ? ' closed' : ''),
         'aria-pressed': String(d === value),
-        'aria-label': (d === today ? 'Today, ' : '') + fmt.dateLong(d),
+        title: closed ? `Closed: ${closed.name}` : null,
+        'aria-label': (d === today ? 'Today, ' : '') + fmt.dateLong(d) + (closed ? `, closed for ${closed.name}` : ''),
         onclick: () => { set(d); onPick(d); },
       }, h('span', { class: 'mon', text: first ? fmt.mon(d) : '' }), h('span', { class: 'dow', text: fmt.dow(d) }), h('span', { class: 'dnum', text: fmt.dayNum(d) }));
       btns.set(d, b);
@@ -719,11 +726,46 @@
 
   // ---- Court grid -----------------------------------------------------------------------------
 
+  /** Lane numbers so overlapping bookings on one court sit side by side. */
+  function assignLanes(items) {
+    const lanes = new Map();
+    const byCourt = new Map();
+    for (const b of items) {
+      if (!byCourt.has(b.court)) byCourt.set(b.court, []);
+      byCourt.get(b.court).push(b);
+    }
+    for (const list of byCourt.values()) {
+      list.sort((a, b) => toMin(a.start) - toMin(b.start));
+      let cluster = [];
+      let clusterEnd = -1;
+      const finish = () => {
+        const count = Math.max(1, ...cluster.map((b) => lanes.get(b).lane + 1));
+        cluster.forEach((b) => { lanes.get(b).count = count; });
+        cluster = [];
+      };
+      for (const b of list) {
+        const s = toMin(b.start);
+        if (cluster.length && s >= clusterEnd) finish();
+        const used = new Set(cluster.filter((x) => toMin(x.end) > s).map((x) => lanes.get(x).lane));
+        let lane = 0;
+        while (used.has(lane)) lane += 1;
+        lanes.set(b, { lane, count: 1 });
+        cluster.push(b);
+        clusterEnd = Math.max(clusterEnd, toMin(b.end));
+      }
+      if (cluster.length) finish();
+    }
+    return lanes;
+  }
+
   /**
    * Courts across, time slots down. `busy` holds bookings (staff) or anonymous
    * busy intervals (players). Free cells call onFree(court, "HH:MM").
+   * `closedName`: the club is closed that day (holiday), so nothing is bookable.
+   * `share` (walk-ins): booked times stay selectable; only blocked time and past
+   * or closed times are not.
    */
-  function scheduleGrid({ date, now, busy, staff, onFree, onItem }) {
+  function scheduleGrid({ date, now, busy, staff, onFree, onItem, closedName, share }) {
     const courts = CFG.courts;
     const open = toMin(CFG.openTime);
     const close = toMin(CFG.closeTime);
@@ -742,9 +784,14 @@
     const isPast = date < now.date;
     const isToday = date === now.date;
     const occ = courts.map(() => new Array(rows).fill(false));
-    const overlaps = (court, s, e) => busy.some((b) => b.court === court && toMin(b.start) < e && toMin(b.end) > s);
+    const isBlock = (b) => b.kind === 'blocked' || b.type === 'block';
+    // Walk-ins only have to avoid blocked time; everyone else avoids all bookings.
+    const blocking = share ? busy.filter(isBlock) : busy;
+    const overlaps = (court, s, e) => blocking.some((b) => b.court === court && toMin(b.start) < e && toMin(b.end) > s);
+    const bookedAt = (court, s, e) => busy.filter((b) => !isBlock(b) && b.court === court && toMin(b.start) < e && toMin(b.end) > s).length;
+    const lanes = staff ? assignLanes(busy) : null;
 
-    for (const b of busy) {
+    for (const b of share ? blocking : busy) {
       const ci = b.court - 1;
       if (ci < 0 || ci >= courts.length) continue;
       const s = toMin(b.start);
@@ -756,6 +803,8 @@
       const style = { gridColumn: String(ci + 2), gridRow: `${r0 + 2} / ${r1 + 2}` };
       if (staff) {
         const st = STATUS[b.status] || STATUS.confirmed;
+        const { lane, count } = lanes.get(b);
+        if (count > 1) Object.assign(style, { justifySelf: 'start', width: `calc(${100 / count}% - 4px)`, marginLeft: `calc(${(lane * 100) / count}% + 2px)`, marginRight: '0' });
         grid.append(h('button', {
           type: 'button', class: 'item staff', 'data-c': st.c, style,
           'aria-label': `${b.name}, ${courtName(b.court)}, ${fmt.range(b.start, b.end)}, ${st.label}`,
@@ -772,6 +821,10 @@
         const t = open + r * step;
         const style = { gridColumn: String(ci + 2), gridRow: String(r + 2) };
         const when = `${c.name}, ${fmt.time(toTime(t))}`;
+        if (closedName) {
+          grid.append(h('div', { class: 'slot closed', style, 'aria-label': `${when}, closed for ${closedName}`, role: 'img' }));
+          continue;
+        }
         // Slots that have already started can't be booked by anyone.
         const started = isPast || (isToday && t <= now.minutes);
         if (staff) {
@@ -785,8 +838,16 @@
           continue;
         }
         const fits = !started && CFG.durations.some((d) => t + d <= close && !overlaps(c.id, t, t + d));
+        const taken = share ? bookedAt(c.id, t, t + step) : 0;
         if (!fits) {
           grid.append(h('div', { class: 'slot closed', style, 'aria-label': `${when}, not available`, role: 'img' }));
+        } else if (taken) {
+          // Walk-in on a booked time: the walk-in shares the court.
+          grid.append(h('button', {
+            type: 'button', class: 'slot shared', style,
+            'aria-label': `${when}, already booked (${taken}). Add a walk-in to share the court`,
+            onclick: () => onFree(c.id, toTime(t)),
+          }, h('span', { class: 'slot-text shared-text', text: taken > 1 ? `Booked ×${taken}` : 'Booked' }), icon('plus')));
         } else {
           grid.append(h('button', {
             type: 'button', class: 'slot', style, 'aria-label': `${when}, available. Book this slot`,
@@ -1055,7 +1116,7 @@
     const title = h('h2', { class: 'datebar-title' });
     const strip = dateStrip({ from: today, to: addDays(today, Math.min(CFG.advanceDays, 90)), value: bookDates[key], onPick: pick });
     const picker = datePicker({ value: bookDates[key], min: today, max: last, onPick: pick });
-    const gridBox = h('div', null, loading());
+    const gridBox = h('div', { class: 'stack', style: { gap: '12px' } }, loading());
     pg.content.append(
       h('section', { class: 'datebar', 'aria-label': 'Date' }, h('div', { class: 'datebar-row' }, title, picker), strip),
       h('div', { class: 'stack', style: { gap: '12px' } },
@@ -1082,10 +1143,13 @@
       try {
         const av = await api(`/api/public/availability?date=${date}`);
         if (id !== reqId) return;
-        gridBox.replaceChildren(scheduleGrid({
-          date, now: av.now, busy: av.busy, staff: false,
-          onFree: (court, start) => openBookSheet({ date, court, start, busy: av.busy, walkIn, onBooked: () => load(true) }),
-        }));
+        gridBox.replaceChildren(...[
+          av.closed ? closedBanner(date, av.closed) : null,
+          scheduleGrid({
+            date, now: av.now, busy: av.busy, staff: false, closedName: av.closed, share: walkIn,
+            onFree: (court, start) => openBookSheet({ date, court, start, busy: av.busy, walkIn, onBooked: () => load(true) }),
+          }),
+        ].filter(Boolean));
       } catch (err) {
         if (id !== reqId) return;
         if (err.status === 401) return handleError(err);
@@ -1106,7 +1170,10 @@
     const staff = ADMIN.signedIn; // staff booking for a customer: PLUS reserve is available
     // Staff book for customers, so the form never fills in details saved on this device.
     const saved = staff ? {} : prefs.get('player', {});
-    const fits = (c, d) => startMin + d <= close && !busy.some((b) => b.court === c && toMin(b.start) < startMin + d && toMin(b.end) > startMin);
+    const overlapping = (c, d, list) => list.filter((b) => b.court === c && toMin(b.start) < startMin + d && toMin(b.end) > startMin);
+    // Walk-ins may share a booked court; only blocked time is off limits for them.
+    const blocking = walkIn ? busy.filter((b) => b.kind === 'blocked') : busy;
+    const fits = (c, d) => startMin + d <= close && !overlapping(c, d, blocking).length;
     const methods = [];
     if (walkIn) {
       methods.push({ value: 'venue', label: 'Pay at desk' });
@@ -1133,6 +1200,7 @@
       S.court, (v) => { S.court = v; refresh(); }, 'Court');
     const durSeg = seg(CFG.durations.map((d) => ({ value: d, label: fmt.dur(d) })), S.duration, (v) => { S.duration = v; refresh(); }, 'Booking length');
     const endNote = h('p', { class: 'group-foot' });
+    const shareNote = h('div');
     const name = h('input', { autocomplete: 'name', maxlength: 80, placeholder: 'Required', value: saved.name || '' });
     const email = h('input', { type: 'email', autocomplete: walkIn ? 'off' : 'email', inputmode: 'email', maxlength: 120, placeholder: walkIn ? 'customer@example.com' : 'you@example.com', value: saved.email || '' });
     const phone = h('input', { type: 'tel', autocomplete: 'tel', inputmode: 'tel', maxlength: 30, placeholder: 'Required', value: saved.phone || '' });
@@ -1160,6 +1228,7 @@
       staff ? plusReserveGroup(S.plus, (v) => { S.plus = v; refresh(); }, false) : null,
       CFG.courts.length > 1 ? group({ title: 'Court', items: [h('div', { class: 'seg-cell' }, courtSeg)] }) : null,
       group({ title: 'How long', items: [h('div', { class: 'seg-cell' }, durSeg)], foot: endNote }),
+      walkIn ? shareNote : null,
       group({
         title: walkIn ? 'Customer details' : 'Your details',
         items: [field('Name', name), field('Email', email), field('Mobile', phone), cell({ title: 'Players', value: players.valueEl, right: players })],
@@ -1188,6 +1257,12 @@
         durSeg.set(S.duration);
       }
       const end = startMin + S.duration;
+      if (walkIn) {
+        const shared = overlapping(S.court, S.duration, busy.filter((b) => b.kind !== 'blocked')).length;
+        shareNote.replaceChildren(...(shared
+          ? [banner('people', `${courtName(S.court)} already has ${shared} booking${shared > 1 ? 's' : ''} at this time. The walk-in will share the court.`, 'warn')]
+          : []));
+      }
       const peak = !S.plus && CFG.peakEnabled && startMin < toMin(CFG.peakEnd) && end > toMin(CFG.peakStart);
       endNote.textContent = `Ends at ${fmt.time(toTime(end))}${peak ? ` · Peak rate of ${fmt.money(CFG.peakPricePerHour)} per player per hour applies from ${fmt.time(CFG.peakStart)}` : ''}`;
       total.textContent = fmt.money(priceFor(startMin, S.duration, S.players, S.plus));
@@ -1565,7 +1640,14 @@
               cell({ ic: 'clock', c: 'orange', title: 'Unpaid bookings', sub: c.autoCancelHours ? `Bank transfer bookings not paid within ${c.autoCancelHours} hour${c.autoCancelHours > 1 ? 's' : ''} are released for others.` : 'Your slot is held until the club confirms your payment.' }),
             ],
           }),
-          pay.length ? group({ title: 'Payment options', items: pay }) : null)),
+          pay.length ? group({ title: 'Payment options', items: pay }) : null,
+          (c.closedDates || []).length
+            ? group({
+              title: 'Holiday closures',
+              items: c.closedDates.slice(0, 12).map((x) => cell({ ic: 'flag', c: 'red', title: x.name, sub: fmt.dateLong(x.date) })),
+              foot: 'The club is closed on these dates, so they can’t be booked.',
+            })
+            : null)),
       group({ title: 'Appearance', items: [h('div', { class: 'seg-cell' }, seg([{ value: 'system', label: 'Automatic' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }], theme, applyTheme, 'Appearance'))] }),
       group({ items: [cell({ ic: 'lock', c: 'gray', title: 'Staff sign in', sub: 'Manage bookings, reports and settings', href: '#/admin', chevron: true })] }));
   }
@@ -1940,6 +2022,12 @@
         sh.body.scrollTop = 0;
         return;
       }
+      const closed = moved && closedOn(S.date);
+      if (closed) {
+        errBox.replaceChildren(banner('alert', `The club is closed on ${fmt.dateLong(S.date)} for ${closed.name}. Choose another date, or reopen it in Settings.`, 'error'));
+        sh.body.scrollTop = 0;
+        return;
+      }
       const body = { ...S, name: S.name.trim() || (S.type === 'block' ? 'Court blocked' : ''), amount: S.type === 'booking' ? Number(amountIn.value || 0) : 0 };
       saveBtn.disabled = true;
       try {
@@ -2122,7 +2210,7 @@
     modeSeg.classList.add('inline');
     const searchIn = h('input', { type: 'search', placeholder: 'Search name, email, phone or reference', 'aria-label': 'Search all bookings' });
     const summary = h('div', { class: 'subtitle' });
-    const box = h('div', null, loading());
+    const box = h('div', { class: 'stack', style: { gap: '12px' } }, loading());
     const dayControls = h('div', { class: 'stack', style: { gap: '12px' } },
       h('section', { class: 'datebar', 'aria-label': 'Date' }, h('div', { class: 'datebar-row' }, title, h('div', { class: 'inline-actions' }, todayBtn, picker)), strip),
       h('div', { class: 'datebar-row' }, modeSeg, summary));
@@ -2163,18 +2251,20 @@
         h('span', { text: `${fmt.hours(hours)} court-hours` }),
         h('span', { text: fmt.money(revenue) }),
         ...(cancelled ? [h('span', { text: `${cancelled} cancelled` })] : []));
+      const closed = closedOn(schedDate);
+      const notice = closed ? closedBanner(schedDate, closed.name) : null;
       if (schedMode === 'grid') {
-        box.replaceChildren(scheduleGrid({
-          date: schedDate, now, busy: active, staff: true,
+        box.replaceChildren(...[notice, scheduleGrid({
+          date: schedDate, now, busy: active, staff: true, closedName: closed && closed.name,
           onFree: (court, start) => openStaffEditor({ init: { date: schedDate, court, start }, onSaved: () => load() }),
           onItem: (b) => openStaffDetail(b, () => load()),
-        }));
+        })].filter(Boolean));
       } else if (!data.length) {
-        box.replaceChildren(emptyState('calendar', 'No bookings on this day', 'Add a booking for a walk-in or phone call, or block time for maintenance.',
-          h('button', { type: 'button', class: 'btn btn-tinted', onclick: () => openStaffEditor({ init: { date: schedDate }, onSaved: () => load() }) }, icon('plus'), 'New Booking')));
+        box.replaceChildren(...[notice, emptyState('calendar', 'No bookings on this day', closed ? null : 'Add a booking for a walk-in or phone call, or block time for maintenance.',
+          closed ? null : h('button', { type: 'button', class: 'btn btn-tinted', onclick: () => openStaffEditor({ init: { date: schedDate }, onSaved: () => load() }) }, icon('plus'), 'New Booking'))].filter(Boolean));
       } else {
         const sorted = [...data].sort((a, b) => (a.start + a.court).localeCompare(b.start + b.court));
-        box.replaceChildren(group({ items: sorted.map((b) => staffBookingCell(b, { onChanged: () => load() })) }));
+        box.replaceChildren(...[notice, group({ items: sorted.map((b) => staffBookingCell(b, { onChanged: () => load() })) })].filter(Boolean));
       }
     }
 
@@ -2718,6 +2808,86 @@
       sh.setBody(body);
     }
 
+    // ---- Holidays and closures --------------------------------------------------------
+    let holidayYear = null;
+    const isClosed = (date) => D.closedDates.some((c) => c.date === date);
+    function setClosed(date, name, kind, on) {
+      D.closedDates = D.closedDates.filter((c) => c.date !== date);
+      if (on) D.closedDates.push({ date, name, kind });
+      D.closedDates.sort((a, b) => a.date.localeCompare(b.date));
+      changed();
+      slots.holidays();
+    }
+
+    function holidaysSection() {
+      const today = clubNow().date;
+      const years = [...new Set(res.holidays.map((x) => x.date.slice(0, 4)))];
+      if (!holidayYear || !years.includes(holidayYear)) holidayYear = years[0];
+      const list = res.holidays.filter((x) => x.date.startsWith(holidayYear));
+      const upcoming = list.filter((x) => x.date >= today);
+      const rows = list.map((x) => {
+        const past = x.date < today;
+        const sw = toggle(isClosed(x.date), (v) => setClosed(x.date, x.name, 'public', v), `Close the club for ${x.name}`, `set-hol-${x.date}`);
+        sw.disabled = past;
+        return cell({
+          ic: 'flag', c: isClosed(x.date) ? 'red' : 'gray', title: x.name,
+          sub: `${fmt.dateLong(x.date)}${past ? ' · passed' : isClosed(x.date) ? ' · closed' : ''}`, right: sw,
+        });
+      });
+      const allClosed = upcoming.length > 0 && upcoming.every((x) => isClosed(x.date));
+      if (upcoming.length) {
+        rows.push(cell({
+          ic: allClosed ? 'undo' : 'lock', c: 'tint', cls: 'tint',
+          title: allClosed ? `Reopen All Upcoming ${holidayYear} Holidays` : `Close All Upcoming ${holidayYear} Holidays`,
+          onClick: () => {
+            const dates = new Set(upcoming.map((x) => x.date));
+            D.closedDates = D.closedDates.filter((c) => !dates.has(c.date));
+            if (!allClosed) upcoming.forEach((x) => D.closedDates.push({ date: x.date, name: x.name, kind: 'public' }));
+            D.closedDates.sort((a, b) => a.date.localeCompare(b.date));
+            changed();
+            slots.holidays();
+          },
+        }));
+      }
+      const specials = D.closedDates.filter((c) => c.kind !== 'public' && c.date >= today);
+      const specialRows = specials.map((c) => cell({
+        ic: 'calendar', c: 'orange', title: c.name, sub: fmt.dateLong(c.date),
+        right: h('button', { type: 'button', class: 'btn btn-sm btn-gray', text: 'Reopen', 'aria-label': `Reopen ${c.name}`, onclick: () => setClosed(c.date, c.name, c.kind, false) }),
+      }));
+      specialRows.push(cell({ ic: 'plus', title: 'Add Special Date', cls: 'tint', onClick: openSpecialDateSheet }));
+      return h('div', { class: 'stack', id: 'holidays' },
+        group({
+          title: 'New Zealand public holidays',
+          items: [h('div', { class: 'seg-cell' }, seg(years.map((y) => ({ value: y, label: y })), holidayYear, (v) => { holidayYear = v; slots.holidays(); }, 'Year')), ...rows],
+          foot: 'Switch a holiday on to close the club that day. Closed dates can’t be booked online, as walk-ins or by staff, and players see them as closed. A date that already has bookings can’t be closed until they’re moved or cancelled. Regional anniversary days aren’t listed; add them below.',
+        }),
+        group({
+          title: 'Special closures',
+          items: specialRows,
+          foot: 'Close the club on other days, such as your regional anniversary day, a tournament or maintenance. Reopen a date to allow bookings again.',
+        }));
+    }
+
+    function openSpecialDateSheet() {
+      const sh = openSheet({ title: 'Add Special Date', guard: true });
+      const err = h('div');
+      const dateIn = h('input', { type: 'date', min: clubNow().date });
+      const nameIn = h('input', { maxlength: 60, placeholder: 'e.g. Auckland Anniversary Day' });
+      sh.setLeft(plainBtn('Cancel', sh.close));
+      sh.setRight(plainBtn('Add', () => {
+        const problem = !dateIn.value ? 'Choose a date.'
+          : dateIn.value < clubNow().date ? 'Choose today or a later date.'
+            : !nameIn.value.trim() ? 'Enter a name for this closure.'
+              : isClosed(dateIn.value) ? 'That date is already closed.' : null;
+        if (problem) return err.replaceChildren(banner('alert', problem, 'error'));
+        setClosed(dateIn.value, nameIn.value.trim(), 'special', true);
+        sh.guard = false;
+        sh.close();
+        toast('Date added. Save changes to close it.');
+      }, true));
+      sh.setBody(err, group({ items: [field('Date', dateIn), field('Name', nameIn)], foot: 'Players will see the club as closed on this date.' }));
+    }
+
     function accountSection() {
       const theme = prefs.get('appearance', 'system');
       return h('div', { class: 'stack' },
@@ -2761,7 +2931,7 @@
       box.replaceChildren(
         errBox,
         h('div', { class: 'cols c-1-1' },
-          h('div', { class: 'stack' }, slot('club', clubSection), slot('courts', courtsSection), slot('pricing', pricingSection)),
+          h('div', { class: 'stack' }, slot('club', clubSection), slot('courts', courtsSection), slot('pricing', pricingSection), slot('holidays', holidaysSection)),
           h('div', { class: 'stack' }, slot('hours', hoursSection), slot('payments', paymentsSection), slot('account', accountSection))));
     }
 

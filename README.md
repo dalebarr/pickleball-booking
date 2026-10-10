@@ -21,8 +21,13 @@ everything from a dashboard. It looks and feels like an iPhone app, and it works
 - **Schedule**: day-by-day court grid or list. Add walk-in or phone bookings, block time for maintenance or clinics, and
   search every booking by name, email, phone or reference.
 - **Walk-in** (staff only): book customers who arrive at the desk, using the same court grid, details and rules as
-  online booking (offered lengths and start times, no past times, players per court, PLUS reserve). Staff can record
-  "Paid now" with a receipt number. Walk-ins are labelled in lists and can be filtered in reports.
+  online booking (offered lengths and start times, no past times, players per court, PLUS reserve). Walk-ins can pick
+  any open time within opening hours and the booking window, even one that's already booked: the walk-in shares the
+  court. Blocked time and closed dates stay unavailable. Staff can record "Paid now" with a receipt number. Walk-ins are
+  labelled in lists and can be filtered in reports.
+- **Holidays and closures** (Settings): close or reopen the club on New Zealand public holidays (this year and next,
+  including Mondayised days and Matariki) or on special dates you add, such as your regional anniversary day. Closed
+  dates can't be booked by anyone and are shown as closed on every booking grid and on Club Info.
 - **Booking actions**: confirm, mark paid or unpaid, check in, no-show, cancel, restore, refund, move or edit, with a history of changes.
 - **PLUS reserve** (staff only): a switch when booking or blocking time, including on the public booking page while a staff
   member is signed in. A PLUS reserve is charged players × hours × the PLUS reserve rate instead of the regular and peak

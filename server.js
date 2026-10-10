@@ -11,6 +11,7 @@ const U = require('./lib/util');
 const B = require('./lib/bookings');
 const R = require('./lib/reports');
 const { createBackend } = require('./lib/store');
+const { nzPublicHolidays } = require('./lib/holidays');
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -232,6 +233,7 @@ route('GET', '/api/public/availability', ({ query }) => {
     date: query.date,
     now: U.nowIn(state.settings.timezone),
     busy: B.availability(state, query.date),
+    closed: (B.closedOn(state.settings, query.date) || {}).name || null,
   };
 });
 
@@ -326,6 +328,11 @@ route('GET', '/api/admin/settings', () => ({
   currencies: B.CURRENCIES,
   durationChoices: B.DURATION_CHOICES,
   limits: { minCourts: B.MIN_COURTS, maxCourts: B.MAX_COURTS },
+  // New Zealand public holidays for this year and next, to close or reopen in Settings.
+  holidays: (() => {
+    const year = Number(U.nowIn(state.settings.timezone).date.slice(0, 4));
+    return [...nzPublicHolidays(year), ...nzPublicHolidays(year + 1)];
+  })(),
 }), { admin: true });
 
 route('PUT', '/api/admin/settings', ({ req, body }) => {
