@@ -686,7 +686,7 @@
     const today = CFG.now.date;
     const el = h('div', { class: 'datestrip', role: 'group', 'aria-label': 'Choose a day' });
     const btns = new Map();
-    for (let d = from, i = 0; d <= to && i < 140; d = addDays(d, 1), i += 1) {
+    for (let d = from, i = 0; d <= to && i < 400; d = addDays(d, 1), i += 1) {
       const first = i === 0 || d.endsWith('-01');
       const closed = closedOn(d);
       const b = h('button', {
@@ -764,8 +764,9 @@
    * `closedName`: the club is closed that day (holiday), so nothing is bookable.
    * `share` (walk-ins): booked times stay selectable; only blocked time and past
    * or closed times are not.
+   * `allowPast` (walk-ins): times that have passed can still be picked, to record a walk-in.
    */
-  function scheduleGrid({ date, now, busy, staff, onFree, onItem, closedName, share }) {
+  function scheduleGrid({ date, now, busy, staff, onFree, onItem, closedName, share, allowPast }) {
     const courts = CFG.courts;
     const open = toMin(CFG.openTime);
     const close = toMin(CFG.closeTime);
@@ -837,22 +838,24 @@
             }, icon('plus')));
           continue;
         }
-        const fits = !started && CFG.durations.some((d) => t + d <= close && !overlaps(c.id, t, t + d));
+        const fits = (allowPast || !started) && CFG.durations.some((d) => t + d <= close && !overlaps(c.id, t, t + d));
+        const pastCls = allowPast && started ? ' past-ok' : '';
         const taken = share ? bookedAt(c.id, t, t + step) : 0;
         if (!fits) {
           grid.append(h('div', { class: 'slot closed', style, 'aria-label': `${when}, not available`, role: 'img' }));
         } else if (taken) {
           // Walk-in on a booked time: the walk-in shares the court.
           grid.append(h('button', {
-            type: 'button', class: 'slot shared', style,
-            'aria-label': `${when}, already booked (${taken}). Add a walk-in to share the court`,
+            type: 'button', class: 'slot shared' + pastCls, style,
+            'aria-label': `${when}, ${pastCls ? 'time has passed, ' : ''}already booked (${taken}). Add a walk-in to share the court`,
             onclick: () => onFree(c.id, toTime(t)),
           }, h('span', { class: 'slot-text shared-text', text: taken > 1 ? `Booked ×${taken}` : 'Booked' }), icon('plus')));
         } else {
           grid.append(h('button', {
-            type: 'button', class: 'slot', style, 'aria-label': `${when}, available. Book this slot`,
+            type: 'button', class: 'slot' + pastCls, style,
+            'aria-label': pastCls ? `${when}, time has passed. Add a walk-in for this time` : `${when}, available. Book this slot`,
             onclick: () => onFree(c.id, toTime(t)),
-          }, icon('plus'), h('span', { class: 'slot-text', text: 'Book' })));
+          }, icon('plus'), h('span', { class: 'slot-text', text: pastCls ? 'Add' : 'Book' })));
         }
       }
     });
@@ -1109,16 +1112,23 @@
 
     const key = walkIn ? 'walkin' : 'online';
     const today = CFG.now.date;
-    // Players book within the booking window; staff (walk-ins, or signed in on this
-    // page) may pick any date from today onwards.
+    // Players book within the booking window. Signed-in staff on this page may pick
+    // any date from today onwards. Walk-ins may be recorded for any date, past or future.
     const anyDate = walkIn || ADMIN.signedIn;
+    const first = walkIn ? null : today;
     const last = anyDate ? null : addDays(today, CFG.advanceDays);
-    if (!bookDates[key] || bookDates[key] < today || (last && bookDates[key] > last)) bookDates[key] = today;
-    const pick = (d) => { if (d >= today) { bookDates[key] = d; load(); } };
+    const inRange = (d) => Boolean(d) && (!first || d >= first) && (!last || d <= last);
+    if (!inRange(bookDates[key])) bookDates[key] = today;
+    const pick = (d) => { if (inRange(d)) { bookDates[key] = d; load(); } };
 
     const title = h('h2', { class: 'datebar-title' });
-    const strip = dateStrip({ from: today, to: addDays(today, anyDate ? 120 : Math.min(CFG.advanceDays, 90)), value: bookDates[key], onPick: pick });
-    const picker = datePicker({ value: bookDates[key], min: today, max: last, onPick: pick });
+    const strip = dateStrip({
+      from: walkIn ? addDays(today, -60) : today,
+      to: addDays(today, anyDate ? 120 : Math.min(CFG.advanceDays, 90)),
+      value: bookDates[key],
+      onPick: pick,
+    });
+    const picker = datePicker({ value: bookDates[key], min: first, max: last, onPick: pick });
     const gridBox = h('div', { class: 'stack', style: { gap: '12px' } }, loading());
     pg.content.append(
       h('section', { class: 'datebar', 'aria-label': 'Date' }, h('div', { class: 'datebar-row' }, title, picker), strip),
@@ -1131,7 +1141,7 @@
         h('p', {
           class: 'group-foot', style: { padding: '0 4px' },
           text: walkIn
-            ? `Tap a slot to book a walk-in customer. Choose any date from today onwards with the date strip or Pick date. Start times later than now, offered lengths and up to ${CFG.maxPlayers} players per court apply.`
+            ? `Tap a slot to add a walk-in. Choose any date, past or future, with the date strip or Pick date, including times that have already passed. Offered lengths and up to ${CFG.maxPlayers} players per court apply.`
             : `Tap an open slot to book. Total = number of players × hours × ${fmt.money(CFG.pricePerHour)} per hour. Up to ${CFG.maxPlayers} players per court.` +
               (anyDate ? ' Signed in as staff: you can book any date from today onwards.' : ''),
         })));
@@ -1150,7 +1160,7 @@
         gridBox.replaceChildren(...[
           av.closed ? closedBanner(date, av.closed) : null,
           scheduleGrid({
-            date, now: av.now, busy: av.busy, staff: false, closedName: av.closed, share: walkIn,
+            date, now: av.now, busy: av.busy, staff: false, closedName: av.closed, share: walkIn, allowPast: walkIn,
             onFree: (court, start) => openBookSheet({ date, court, start, busy: av.busy, walkIn, onBooked: () => load(true) }),
           }),
         ].filter(Boolean));
@@ -1204,7 +1214,7 @@
       S.court, (v) => { S.court = v; refresh(); }, 'Court');
     const durSeg = seg(CFG.durations.map((d) => ({ value: d, label: fmt.dur(d) })), S.duration, (v) => { S.duration = v; refresh(); }, 'Booking length');
     const endNote = h('p', { class: 'group-foot' });
-    const shareNote = h('div');
+    const shareNote = h('div', { class: 'stack', style: { gap: '10px' } });
     const name = h('input', { autocomplete: 'name', maxlength: 80, placeholder: 'Required', value: saved.name || '' });
     const email = h('input', { type: 'email', autocomplete: walkIn ? 'off' : 'email', inputmode: 'email', maxlength: 120, placeholder: walkIn ? 'customer@example.com' : 'you@example.com', value: saved.email || '' });
     const phone = h('input', { type: 'tel', autocomplete: 'tel', inputmode: 'tel', maxlength: 30, placeholder: 'Required', value: saved.phone || '' });
@@ -1263,9 +1273,11 @@
       const end = startMin + S.duration;
       if (walkIn) {
         const shared = overlapping(S.court, S.duration, busy.filter((b) => b.kind !== 'blocked')).length;
-        shareNote.replaceChildren(...(shared
-          ? [banner('people', `${courtName(S.court)} already has ${shared} booking${shared > 1 ? 's' : ''} at this time. The walk-in will share the court.`, 'warn')]
-          : []));
+        const past = !isFutureStart(date, start);
+        shareNote.replaceChildren(...[
+          past ? banner('clock', `This time has passed. The walk-in will be recorded for ${fmt.dateLong(date)} at ${fmt.time(start)}.`) : null,
+          shared ? banner('people', `${courtName(S.court)} already has ${shared} booking${shared > 1 ? 's' : ''} at this time. The walk-in will share the court.`, 'warn') : null,
+        ].filter(Boolean));
       }
       const peak = !S.plus && CFG.peakEnabled && startMin < toMin(CFG.peakEnd) && end > toMin(CFG.peakStart);
       endNote.textContent = `Ends at ${fmt.time(toTime(end))}${peak ? ` · Peak rate of ${fmt.money(CFG.peakPricePerHour)} per player per hour applies from ${fmt.time(CFG.peakStart)}` : ''}`;
@@ -1909,11 +1921,13 @@
     const pastMessage = 'That time has already passed. Choose a later time today or a future date.';
     // An existing booking may keep its own (possibly past) slot; anything else must be in the future.
     const keepsOwnSlot = (date, start) => isEdit && date === e.date && start === e.start;
+    // Walk-ins can be recorded or moved to any date and time, past included.
+    const pastOk = isEdit && e.source === 'walkin';
     const startSel = h('select', { onchange: (ev) => { S.start = ev.target.value; syncTimes(); } });
 
     function syncStartOptions() {
       const now = clubNow();
-      const options = timeOptions(open, close - 30).map((o) => ({ ...o, disabled: !isFutureStart(S.date, o.value, now) && !keepsOwnSlot(S.date, o.value) }));
+      const options = timeOptions(open, close - 30).map((o) => ({ ...o, disabled: !pastOk && !isFutureStart(S.date, o.value, now) && !keepsOwnSlot(S.date, o.value) }));
       startSel.replaceChildren(...options.map((o) => h('option', { value: o.value, text: o.label, disabled: o.disabled || null })));
       const current = options.find((o) => o.value === S.start);
       if (!current || current.disabled) {
@@ -2021,7 +2035,7 @@
         return;
       }
       const moved = !isEdit || S.date !== e.date || S.start !== e.start || S.court !== e.court;
-      if (moved && !isFutureStart(S.date, S.start)) {
+      if (moved && !pastOk && !isFutureStart(S.date, S.start)) {
         errBox.replaceChildren(banner('alert', pastMessage, 'error'));
         sh.body.scrollTop = 0;
         return;
