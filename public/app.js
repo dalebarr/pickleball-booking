@@ -1109,12 +1109,15 @@
 
     const key = walkIn ? 'walkin' : 'online';
     const today = CFG.now.date;
-    const last = addDays(today, CFG.advanceDays);
-    if (!bookDates[key] || bookDates[key] < today || bookDates[key] > last) bookDates[key] = today;
-    const pick = (d) => { bookDates[key] = d; load(); };
+    // Players book within the booking window; staff (walk-ins, or signed in on this
+    // page) may pick any date from today onwards.
+    const anyDate = walkIn || ADMIN.signedIn;
+    const last = anyDate ? null : addDays(today, CFG.advanceDays);
+    if (!bookDates[key] || bookDates[key] < today || (last && bookDates[key] > last)) bookDates[key] = today;
+    const pick = (d) => { if (d >= today) { bookDates[key] = d; load(); } };
 
     const title = h('h2', { class: 'datebar-title' });
-    const strip = dateStrip({ from: today, to: addDays(today, Math.min(CFG.advanceDays, 90)), value: bookDates[key], onPick: pick });
+    const strip = dateStrip({ from: today, to: addDays(today, anyDate ? 120 : Math.min(CFG.advanceDays, 90)), value: bookDates[key], onPick: pick });
     const picker = datePicker({ value: bookDates[key], min: today, max: last, onPick: pick });
     const gridBox = h('div', { class: 'stack', style: { gap: '12px' } }, loading());
     pg.content.append(
@@ -1128,8 +1131,9 @@
         h('p', {
           class: 'group-foot', style: { padding: '0 4px' },
           text: walkIn
-            ? `Tap an open slot to book a walk-in customer. The same rules as online booking apply: the next open start time, offered lengths and up to ${CFG.maxPlayers} players per court.`
-            : `Tap an open slot to book. Total = number of players × hours × ${fmt.money(CFG.pricePerHour)} per hour. Up to ${CFG.maxPlayers} players per court.`,
+            ? `Tap a slot to book a walk-in customer. Choose any date from today onwards with the date strip or Pick date. Start times later than now, offered lengths and up to ${CFG.maxPlayers} players per court apply.`
+            : `Tap an open slot to book. Total = number of players × hours × ${fmt.money(CFG.pricePerHour)} per hour. Up to ${CFG.maxPlayers} players per court.` +
+              (anyDate ? ' Signed in as staff: you can book any date from today onwards.' : ''),
         })));
 
     let reqId = 0;
