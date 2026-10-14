@@ -6,10 +6,12 @@ everything from a dashboard. It looks and feels like an iPhone app, and it works
 ## What it does
 
 **For players** (the public booking site)
-- Pick a **date**, then an available **court**. Each booking is for the whole session, from the opening to the closing
-  time set in Settings; there are no time slots or booking lengths to choose.
-- Online bookings are for **4 to 6 players per court** (set in Settings). The price updates as they choose:
-  **total = number of players × session hours × rate per hour** (hours inside peak time use the peak rate).
+- Pick a **date**, then an available **court**. The court is reserved for that day's session, from the opening to the
+  closing time set in Settings (weekdays, Monday to Thursday, and weekends, Friday to Sunday, have their own hours);
+  there are no time slots to choose.
+- In their details they enter **Booked hours**: from 1 hour up to the length of that day's session, in half hours.
+  The price updates as they choose: **amount due = number of players × booked hours × rate per hour**.
+- Online bookings are for the number of players per court set in Settings (4 to 6 unless you change it).
 - Today can be booked until closing time.
 - Pay by **bank transfer** (they're shown the club's bank details and a booking reference) or **at the venue**.
 - After paying by transfer, send the transfer reference so staff can match the payment.
@@ -23,7 +25,7 @@ everything from a dashboard. It looks and feels like an iPhone app, and it works
 - **Schedule**: day by day, one card per court with its bookings. Add phone bookings or block a court for the day
   (maintenance, clinics), and search every booking by name, email, phone or reference.
 - **Walk-in** (staff only): book customers who arrive at the desk by picking a date and a court, with the same details
-  as online booking and the PLUS reserve option. Walk-ins aren't limited to 4–6 players. Staff can pick any date, past
+  as online booking (including booked hours) and the PLUS reserve option. Walk-ins aren't limited by the online player rules. Staff can pick any date, past
   or future (the players' booking window doesn't apply), including a court that is already booked: the walk-in shares
   the court. Blocked courts and closed dates stay unavailable. Signed-in staff can also book any date from today onwards
   on the Book a Court page. Staff can record "Paid now" with a receipt number. Walk-ins are labelled in lists and can be
@@ -31,21 +33,23 @@ everything from a dashboard. It looks and feels like an iPhone app, and it works
 - **Holidays and closures** (Settings): close or reopen the club on New Zealand public holidays (this year and next,
   including Mondayised days and Matariki) or on special dates you add, such as your regional anniversary day. Closed
   dates can't be booked by anyone and are shown as closed on every booking page and on Club Info.
-- **Booking actions**: confirm, mark paid or unpaid, check in, no-show, cancel, restore, refund, move or edit, with a history of changes.
+- **Booking actions**: confirm, mark paid or unpaid, check in, no-show, cancel, restore, refund, move or edit (including
+  booked hours), with a history of changes.
 - **PLUS reserve** (staff only): a switch when booking or blocking time, including on the public booking page while a staff
-  member is signed in. A PLUS reserve is charged players × hours × the PLUS reserve rate instead of the regular and peak
-  rates. Players never see the switch, the rate or the label.
+  member is signed in. A PLUS reserve is charged players × booked hours × the PLUS reserve rate instead of the regular rate. Players never see the switch, the rate or the label.
 - **Reports**: unfiltered ("All records") or filtered by period (today, this week, this month, last month, custom range and more),
   court, status, payment status, payment method, PLUS reserve, channel (online, walk-in, staff) and text search. Shows totals,
-  court use, value booked and collected, outstanding money, a by-day/by-month chart, breakdowns by court, status, payment,
+  booked hours, court use, value booked and collected, outstanding money, a by-day/by-month chart, breakdowns by court, status, payment,
   rate, channel and day of week,
-  plus the full booking list. **Export to CSV** (opens in Excel or Google Sheets) or **print**.
+  plus the full booking list with booked hours. **Export to CSV** (opens in Excel or Google Sheets) or **print**.
 - **Settings**:
   - **Number of courts**: minimum 1, maximum 3, with a name for each court.
   - **Bank accounts**: save one or more accounts and choose which one players pay into. Unpaid bookings switch to the new account straight away.
-  - Opening hours (the booking session), minimum and maximum players per court for online bookings, how far ahead
+  - **Opening hours**: separate opening and closing times for weekdays (Monday to Thursday) and weekends (Friday to
+    Sunday). Each date's session follows its day.
+  - **Booking rules**: minimum players per court for online bookings (1, 2, 3 or 4), maximum (5 or 6), how far ahead
     people can book, cancellation cutoff, automatic release of unpaid bookings.
-  - Rate per player per hour, optional peak rate and hours, PLUS reserve rate (staff only), currency, time zone.
+  - Rate per player per hour, PLUS reserve rate (staff only), currency, time zone.
   - Payment options (bank transfer and/or pay at venue) and payment instructions.
   - Change password, download a backup, sign out.
 
@@ -60,8 +64,8 @@ cd pickleball-booking
 npm start
 ```
 
-Open http://localhost:3000. Go to http://localhost:3000/#/admin the first time to set up your club (name, courts, hours,
-price and a staff password). Prices are in New Zealand dollars (NZD) unless you pick another currency. Then open **Settings → Bank account for payments** to add the account players pay into.
+Open http://localhost:3000. Go to http://localhost:3000/#/admin the first time to set up your club (name, courts, weekday and
+weekend hours, price and a staff password). Prices are in New Zealand dollars (NZD) unless you pick another currency. Then open **Settings → Bank account for payments** to add the account players pay into.
 
 Other devices on the same Wi-Fi can use it at `http://<your computer's IP address>:3000`.
 That only works while your computer is on, so for real use put it online as described next.

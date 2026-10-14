@@ -403,6 +403,10 @@ button.cell:focus-visible, a.cell:focus-visible { outline-offset: -3px; }
 .seg button:disabled { color: var(--label-3); cursor: default; }
 .seg.inline { display: inline-grid; }
 .seg-cell { padding: 8px 12px; }
+/* Tap-to-choose numbers inside a list row (e.g. minimum and maximum players). */
+.seg.pick { display: inline-grid; grid-auto-columns: 44px; flex: none; }
+.seg.pick button { min-height: 32px; font-variant-numeric: tabular-nums; }
+@media (max-width: 420px) { .seg.pick { grid-auto-columns: 36px; } }
 
 .switch {
   -webkit-appearance: none; appearance: none; margin: 0; flex: none; cursor: pointer;
