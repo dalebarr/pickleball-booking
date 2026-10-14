@@ -307,7 +307,6 @@
     }
   }
 
-  const isFutureStart = (date, start, now = clubNow()) => date > now.date || (date === now.date && toMin(start) > now.minutes);
 
   // ---- Live updates (staff screens) ------------------------------------------------------
   // The server pushes a message whenever a booking changes. The open staff screen
@@ -724,147 +723,74 @@
     return el;
   }
 
-  // ---- Court grid -----------------------------------------------------------------------------
+  // ---- Courts for a day -----------------------------------------------------------------------
+  // Bookings are for a date and a court and cover the whole session: opening to
+  // closing time from Settings. There are no time slots or booking lengths.
 
-  /** Lane numbers so overlapping bookings on one court sit side by side. */
-  function assignLanes(items) {
-    const lanes = new Map();
-    const byCourt = new Map();
-    for (const b of items) {
-      if (!byCourt.has(b.court)) byCourt.set(b.court, []);
-      byCourt.get(b.court).push(b);
-    }
-    for (const list of byCourt.values()) {
-      list.sort((a, b) => toMin(a.start) - toMin(b.start));
-      let cluster = [];
-      let clusterEnd = -1;
-      const finish = () => {
-        const count = Math.max(1, ...cluster.map((b) => lanes.get(b).lane + 1));
-        cluster.forEach((b) => { lanes.get(b).count = count; });
-        cluster = [];
-      };
-      for (const b of list) {
-        const s = toMin(b.start);
-        if (cluster.length && s >= clusterEnd) finish();
-        const used = new Set(cluster.filter((x) => toMin(x.end) > s).map((x) => lanes.get(x).lane));
-        let lane = 0;
-        while (used.has(lane)) lane += 1;
-        lanes.set(b, { lane, count: 1 });
-        cluster.push(b);
-        clusterEnd = Math.max(clusterEnd, toMin(b.end));
-      }
-      if (cluster.length) finish();
-    }
-    return lanes;
-  }
+  const isBlockItem = (b) => b.kind === 'blocked' || b.type === 'block';
+  const sessionMinutes = () => toMin(CFG.closeTime) - toMin(CFG.openTime);
+  const sessionText = () => `${fmt.range(CFG.openTime, CFG.closeTime)} (${fmt.dur(sessionMinutes())})`;
+  /** True until closing time on `date` (a session that hasn't ended can still be booked). */
+  const sessionOpen = (date, now = clubNow()) => date > now.date || (date === now.date && now.minutes < toMin(CFG.closeTime));
+  const playersText = () => (CFG.minPlayers === CFG.maxPlayers ? `${CFG.maxPlayers} players` : `${CFG.minPlayers}–${CFG.maxPlayers} players`);
 
   /**
-   * Courts across, time slots down. `busy` holds bookings (staff) or anonymous
-   * busy intervals (players). Free cells call onFree(court, "HH:MM").
-   * `closedName`: the club is closed that day (holiday), so nothing is bookable.
-   * `share` (walk-ins): booked times stay selectable; only blocked time and past
-   * or closed times are not.
-   * `allowPast` (walk-ins): times that have passed can still be picked, to record a walk-in.
+   * One row per court for a date, for players (online) and walk-ins.
+   * Online: a court is bookable when nothing is on it and the session hasn't ended.
+   * Walk-ins (`share`): a booked court stays selectable (the walk-in shares it) and
+   * past dates are allowed. Blocked courts and closed dates are never selectable.
    */
-  function scheduleGrid({ date, now, busy, staff, onFree, onItem, closedName, share, allowPast }) {
-    const courts = CFG.courts;
-    const open = toMin(CFG.openTime);
-    const close = toMin(CFG.closeTime);
-    const step = CFG.slotMinutes;
-    const rows = Math.ceil((close - open) / step);
-    const rowH = step === 30 ? 40 : 56;
-    const grid = h('div', { class: 'sched' + (staff ? ' staff' : ''), style: { '--courts': courts.length, '--rows': rows, '--row-h': rowH + 'px' } });
-    grid.append(h('div', { class: 'sched-corner', style: { gridColumn: '1', gridRow: '1' } }));
-    courts.forEach((c, i) => grid.append(h('div', { class: 'sched-court', style: { gridColumn: String(i + 2), gridRow: '1' }, text: c.name })));
-    for (let r = 0; r < rows; r += 1) {
-      const t = open + r * step;
-      const label = step === 60 || t % 60 === 0 ? (t % 60 === 0 ? fmt.hour(t / 60) : fmt.time(toTime(t))) : '';
-      grid.append(h('div', { class: 'sched-time', style: { gridColumn: '1', gridRow: String(r + 2) }, text: label }));
-    }
-
-    const isPast = date < now.date;
-    const isToday = date === now.date;
-    const occ = courts.map(() => new Array(rows).fill(false));
-    const isBlock = (b) => b.kind === 'blocked' || b.type === 'block';
-    // Walk-ins only have to avoid blocked time; everyone else avoids all bookings.
-    const blocking = share ? busy.filter(isBlock) : busy;
-    const overlaps = (court, s, e) => blocking.some((b) => b.court === court && toMin(b.start) < e && toMin(b.end) > s);
-    const bookedAt = (court, s, e) => busy.filter((b) => !isBlock(b) && b.court === court && toMin(b.start) < e && toMin(b.end) > s).length;
-    const lanes = staff ? assignLanes(busy) : null;
-
-    for (const b of share ? blocking : busy) {
-      const ci = b.court - 1;
-      if (ci < 0 || ci >= courts.length) continue;
-      const s = toMin(b.start);
-      const e = toMin(b.end);
-      const r0 = clamp(Math.floor((s - open) / step), 0, rows);
-      const r1 = clamp(Math.ceil((e - open) / step), 0, rows);
-      if (r1 <= r0) continue;
-      for (let r = r0; r < r1; r += 1) occ[ci][r] = true;
-      const style = { gridColumn: String(ci + 2), gridRow: `${r0 + 2} / ${r1 + 2}` };
-      if (staff) {
-        const st = STATUS[b.status] || STATUS.confirmed;
-        const { lane, count } = lanes.get(b);
-        if (count > 1) Object.assign(style, { justifySelf: 'start', width: `calc(${100 / count}% - 4px)`, marginLeft: `calc(${(lane * 100) / count}% + 2px)`, marginRight: '0' });
-        grid.append(h('button', {
-          type: 'button', class: 'item staff', 'data-c': st.c, style,
-          'aria-label': `${b.name}, ${courtName(b.court)}, ${fmt.range(b.start, b.end)}, ${st.label}`,
-          onclick: () => onItem(b),
-        }, h('span', { class: 'it-title', text: b.name }), h('span', { class: 'it-sub', text: `${b.source === 'walkin' ? 'Walk-in · ' : ''}${b.plus ? 'PLUS · ' : ''}${fmt.range(b.start, b.end)} · ${st.label}` })));
-      } else {
-        grid.append(h('div', { class: 'item public', style, text: b.kind === 'blocked' ? 'Unavailable' : 'Booked' }));
-      }
-    }
-
-    courts.forEach((c, ci) => {
-      for (let r = 0; r < rows; r += 1) {
-        if (occ[ci][r]) continue;
-        const t = open + r * step;
-        const style = { gridColumn: String(ci + 2), gridRow: String(r + 2) };
-        const when = `${c.name}, ${fmt.time(toTime(t))}`;
-        if (closedName) {
-          grid.append(h('div', { class: 'slot closed', style, 'aria-label': `${when}, closed for ${closedName}`, role: 'img' }));
-          continue;
-        }
-        // Slots that have already started can't be booked by anyone.
-        const started = isPast || (isToday && t <= now.minutes);
-        if (staff) {
-          grid.append(started
-            ? h('div', { class: 'slot closed', style, 'aria-label': `${when}, time has passed`, role: 'img' })
-            : h('button', {
-              type: 'button', class: 'slot', style,
-              'aria-label': `${when}, open. Add a booking`, title: 'Add a booking',
-              onclick: () => onFree(c.id, toTime(t)),
-            }, icon('plus')));
-          continue;
-        }
-        const fits = (allowPast || !started) && CFG.durations.some((d) => t + d <= close && !overlaps(c.id, t, t + d));
-        const pastCls = allowPast && started ? ' past-ok' : '';
-        const taken = share ? bookedAt(c.id, t, t + step) : 0;
-        if (!fits) {
-          grid.append(h('div', { class: 'slot closed', style, 'aria-label': `${when}, not available`, role: 'img' }));
-        } else if (taken) {
-          // Walk-in on a booked time: the walk-in shares the court.
-          grid.append(h('button', {
-            type: 'button', class: 'slot shared' + pastCls, style,
-            'aria-label': `${when}, ${pastCls ? 'time has passed, ' : ''}already booked (${taken}). Add a walk-in to share the court`,
-            onclick: () => onFree(c.id, toTime(t)),
-          }, h('span', { class: 'slot-text shared-text', text: taken > 1 ? `Booked ×${taken}` : 'Booked' }), icon('plus')));
-        } else {
-          grid.append(h('button', {
-            type: 'button', class: 'slot' + pastCls, style,
-            'aria-label': pastCls ? `${when}, time has passed. Add a walk-in for this time` : `${when}, available. Book this slot`,
-            onclick: () => onFree(c.id, toTime(t)),
-          }, icon('plus'), h('span', { class: 'slot-text', text: pastCls ? 'Add' : 'Book' })));
-        }
-      }
+  function courtDayList({ date, now, busy, share, closedName, onPick }) {
+    const ended = !sessionOpen(date, now);
+    const items = CFG.courts.map((c) => {
+      const onCourt = busy.filter((b) => b.court === c.id);
+      const blocked = onCourt.some(isBlockItem);
+      const booked = onCourt.filter((b) => !isBlockItem(b)).length;
+      let status;
+      let tag = null;
+      let available = false;
+      if (closedName) { status = `Closed for ${closedName}`; tag = 'Closed'; }
+      else if (blocked) { status = 'Not available: blocked by the club'; tag = 'Unavailable'; }
+      else if (share) {
+        available = true;
+        status = booked ? `Already booked (${booked}). The walk-in will share the court.` : ended ? 'Open · this date has passed' : 'Open';
+      } else if (booked) { status = 'Already booked'; tag = 'Booked'; }
+      else if (ended) { status = 'Today’s session has ended'; tag = 'Ended'; }
+      else { available = true; status = 'Available'; }
+      const action = share ? 'Add Walk-in' : 'Book';
+      return cell({
+        ic: 'court', c: !available ? 'gray' : booked ? 'orange' : 'tint',
+        title: c.name,
+        sub: `${status} · ${fmt.range(CFG.openTime, CFG.closeTime)}`,
+        right: available
+          ? h('span', { class: 'btn btn-sm btn-filled', 'aria-hidden': 'true' }, action)
+          : h('span', { class: 'chip', 'data-c': tag === 'Booked' ? 'orange' : 'gray' }, h('span', { class: 'dot' }), tag),
+        onClick: available ? () => onPick(c.id) : null,
+        label: available ? `${c.name}: ${status}. ${action}` : null,
+      });
     });
+    return group({ title: 'Courts', items });
+  }
 
-    if (isToday && now.minutes > open && now.minutes < close) {
-      const top = 44 + ((now.minutes - open) / step) * rowH;
-      grid.append(h('div', { class: 'now-line', style: { top: top + 'px' }, 'aria-hidden': 'true' }));
-    }
-    return h('div', { class: 'sched-wrap' }, grid);
+  /** Staff schedule for a date: one card per court with its bookings. */
+  function staffCourtDay({ date, now, bookings, closedName, onAdd, onChanged }) {
+    const canAdd = !closedName && sessionOpen(date, now);
+    return h('div', { class: 'stack' }, CFG.courts.map((c) => {
+      const onCourt = bookings.filter((b) => b.court === c.id).sort((a, b) => (a.start + a.ref).localeCompare(b.start + b.ref));
+      const active = onCourt.filter((b) => b.status !== 'cancelled');
+      const blocked = active.some(isBlockItem);
+      const tag = closedName ? ['Closed', 'gray'] : blocked ? ['Blocked', 'indigo'] : active.length ? [`${active.length} booking${active.length === 1 ? '' : 's'}`, 'orange'] : ['Available', 'green'];
+      const items = onCourt.map((b) => staffBookingCell(b, { onChanged }));
+      if (canAdd && !active.length) {
+        items.push(cell({ ic: 'plus', title: 'New Booking', sub: `Whole session, ${sessionText()}`, cls: 'tint', onClick: () => onAdd(c.id) }));
+      }
+      if (!items.length) items.push(cell({ title: closedName ? `Closed for ${closedName}` : 'No bookings', sub: closedName ? null : 'This session has ended.' }));
+      return group({
+        title: c.name,
+        aside: h('span', { class: 'chip', 'data-c': tag[1] }, h('span', { class: 'dot' }), tag[0]),
+        items,
+      });
+    }));
   }
 
   // ---- Charts ---------------------------------------------------------------------------------
@@ -1129,22 +1055,19 @@
       onPick: pick,
     });
     const picker = datePicker({ value: bookDates[key], min: first, max: last, onPick: pick });
-    const gridBox = h('div', { class: 'stack', style: { gap: '12px' } }, loading());
+    const courtsBox = h('div', { class: 'stack', style: { gap: '12px' } }, loading());
+    const price = fmt.money(priceFor(toMin(CFG.openTime), sessionMinutes(), 1, false));
     pg.content.append(
       h('section', { class: 'datebar', 'aria-label': 'Date' }, h('div', { class: 'datebar-row' }, title, picker), strip),
-      h('div', { class: 'stack', style: { gap: '12px' } },
-        h('div', { class: 'legend', 'aria-hidden': 'true' },
-          h('span', null, h('i', { class: 'l-open' }), 'Open'),
-          h('span', null, h('i', { class: 'l-booked' }), 'Booked'),
-          h('span', null, h('i', { class: 'l-closed' }), 'Not available')),
-        gridBox,
-        h('p', {
-          class: 'group-foot', style: { padding: '0 4px' },
-          text: walkIn
-            ? `Tap a slot to add a walk-in. Choose any date, past or future, with the date strip or Pick date, including times that have already passed. Offered lengths and up to ${CFG.maxPlayers} players per court apply.`
-            : `Tap an open slot to book. Total = number of players × hours × ${fmt.money(CFG.pricePerHour)} per hour. Up to ${CFG.maxPlayers} players per court.` +
-              (anyDate ? ' Signed in as staff: you can book any date from today onwards.' : ''),
-        })));
+      courtsBox,
+      h('p', {
+        class: 'group-foot', style: { padding: '0 4px' },
+        text: walkIn
+          ? `Pick a date, then a court, to add a walk-in. Any date, past or future, can be chosen with the date strip or Pick date. A booked court can be shared. Walk-ins aren’t limited to ${playersText()}.`
+          : `Pick a date, then a court. Each booking is for the whole session, ${sessionText()}, for ${playersText()} per court. ` +
+            `Total = number of players × ${fmt.dur(sessionMinutes())} × ${fmt.money(CFG.pricePerHour)} per hour (${price} per player).` +
+            (anyDate ? ' Signed in as staff: you can book any date from today onwards.' : ''),
+      }));
 
     let reqId = 0;
     async function load(quiet) {
@@ -1153,41 +1076,44 @@
       title.textContent = dayLabel(date);
       strip.set(date);
       picker.set(date);
-      if (!quiet) gridBox.replaceChildren(loading());
+      if (!quiet) courtsBox.replaceChildren(loading());
       try {
         const av = await api(`/api/public/availability?date=${date}`);
         if (id !== reqId) return;
-        gridBox.replaceChildren(...[
+        courtsBox.replaceChildren(...[
           av.closed ? closedBanner(date, av.closed) : null,
-          scheduleGrid({
-            date, now: av.now, busy: av.busy, staff: false, closedName: av.closed, share: walkIn, allowPast: walkIn,
-            onFree: (court, start) => openBookSheet({ date, court, start, busy: av.busy, walkIn, onBooked: () => load(true) }),
+          courtDayList({
+            date, now: av.now, busy: av.busy, share: walkIn, closedName: av.closed,
+            onPick: (court) => openBookSheet({ date, court, busy: av.busy, walkIn, onBooked: () => load(true) }),
           }),
         ].filter(Boolean));
       } catch (err) {
         if (id !== reqId) return;
         if (err.status === 401) return handleError(err);
-        gridBox.replaceChildren(emptyState('alert', 'Couldn’t load courts', err.message, h('button', { type: 'button', class: 'btn btn-tinted', text: 'Try Again', onclick: () => load() })));
+        courtsBox.replaceChildren(emptyState('alert', 'Couldn’t load courts', err.message, h('button', { type: 'button', class: 'btn btn-tinted', text: 'Try Again', onclick: () => load() })));
       }
     }
     await load();
     if (walkIn) live.handler = () => load(true); // show other people's bookings straight away
     const timer = setInterval(() => {
-      if (!gridBox.isConnected) return clearInterval(timer);
+      if (!courtsBox.isConnected) return clearInterval(timer);
       if (!document.hidden && !layers.length) load(true);
     }, 60000);
   }
 
-  function openBookSheet({ date, court, start, busy, onBooked, walkIn = false }) {
-    const close = toMin(CFG.closeTime);
-    const startMin = toMin(start);
+  /** Book a court for the whole session on a date: online, or as a walk-in (staff). */
+  function openBookSheet({ date, court, busy, onBooked, walkIn = false }) {
+    const open = toMin(CFG.openTime);
+    const minutes = sessionMinutes();
     const staff = ADMIN.signedIn; // staff booking for a customer: PLUS reserve is available
     // Staff book for customers, so the form never fills in details saved on this device.
     const saved = staff ? {} : prefs.get('player', {});
-    const overlapping = (c, d, list) => list.filter((b) => b.court === c && toMin(b.start) < startMin + d && toMin(b.end) > startMin);
-    // Walk-ins may share a booked court; only blocked time is off limits for them.
-    const blocking = walkIn ? busy.filter((b) => b.kind === 'blocked') : busy;
-    const fits = (c, d) => startMin + d <= close && !overlapping(c, d, blocking).length;
+    const onCourt = (c) => busy.filter((b) => b.court === c);
+    // Online: a court with anything on it is taken. Walk-ins only avoid blocked courts.
+    const usable = (c) => (walkIn ? !onCourt(c).some(isBlockItem) : !onCourt(c).length);
+    // Players: online bookings need minPlayers–maxPlayers; walk-ins aren't limited.
+    const minP = walkIn ? 1 : CFG.minPlayers;
+    const maxP = walkIn ? 12 : CFG.maxPlayers;
     const methods = [];
     if (walkIn) {
       methods.push({ value: 'venue', label: 'Pay at desk' });
@@ -1198,9 +1124,8 @@
     }
     const S = {
       court,
-      duration: CFG.durations.find((d) => fits(court, d)),
       method: methods[0] ? methods[0].value : 'venue',
-      players: clamp(saved.players || Math.min(4, CFG.maxPlayers), 1, CFG.maxPlayers),
+      players: clamp(saved.players || (walkIn ? 4 : CFG.minPlayers), minP, maxP),
       plus: false,
       paid: walkIn, // walk-ins usually pay at the desk straight away
     };
@@ -1210,15 +1135,14 @@
     sh.setLeft(plainBtn('Cancel', sh.close));
 
     const errBox = h('div');
-    const courtSeg = seg(CFG.courts.map((c) => ({ value: c.id, label: c.name, disabled: !CFG.durations.some((d) => fits(c.id, d)) })),
+    const courtSeg = seg(CFG.courts.map((c) => ({ value: c.id, label: c.name, disabled: !usable(c.id) })),
       S.court, (v) => { S.court = v; refresh(); }, 'Court');
-    const durSeg = seg(CFG.durations.map((d) => ({ value: d, label: fmt.dur(d) })), S.duration, (v) => { S.duration = v; refresh(); }, 'Booking length');
-    const endNote = h('p', { class: 'group-foot' });
+    const sessionNote = h('p', { class: 'group-foot' });
     const shareNote = h('div', { class: 'stack', style: { gap: '10px' } });
     const name = h('input', { autocomplete: 'name', maxlength: 80, placeholder: 'Required', value: saved.name || '' });
     const email = h('input', { type: 'email', autocomplete: walkIn ? 'off' : 'email', inputmode: 'email', maxlength: 120, placeholder: walkIn ? 'customer@example.com' : 'you@example.com', value: saved.email || '' });
     const phone = h('input', { type: 'tel', autocomplete: 'tel', inputmode: 'tel', maxlength: 30, placeholder: 'Required', value: saved.phone || '' });
-    const players = stepper({ value: S.players, min: 1, max: CFG.maxPlayers, label: 'Players', onChange: (v) => { S.players = v; refresh(); } });
+    const players = stepper({ value: S.players, min: minP, max: maxP, label: 'Players', onChange: (v) => { S.players = v; refresh(); } });
     const notes = h('textarea', { maxlength: 300, placeholder: 'Anything the club should know (optional)', 'aria-label': 'Notes' });
     const methodSeg = methods.length > 1 ? seg(methods, S.method, (v) => { S.method = v; refresh(); }, 'Payment method') : null;
     const methodNote = h('p', { class: 'group-foot' });
@@ -1238,17 +1162,16 @@
       errBox,
       h('div', { class: 'summary-head' },
         h('h3', { text: dayLabel(date) === 'Today' || dayLabel(date) === 'Tomorrow' ? `${dayLabel(date)}, ${fmt.dateShort(date)}` : fmt.dayTitle(date) }),
-        h('div', { class: 'meta' }, meta('clock', `Starts ${fmt.time(start)}`))),
+        h('div', { class: 'meta' }, meta('clock', `Whole session, ${sessionText()}`))),
       staff ? plusReserveGroup(S.plus, (v) => { S.plus = v; refresh(); }, false) : null,
-      CFG.courts.length > 1 ? group({ title: 'Court', items: [h('div', { class: 'seg-cell' }, courtSeg)] }) : null,
-      group({ title: 'How long', items: [h('div', { class: 'seg-cell' }, durSeg)], foot: endNote }),
+      group({ title: 'Court', items: [CFG.courts.length > 1 ? h('div', { class: 'seg-cell' }, courtSeg) : row(CFG.courts[0].name, null)], foot: sessionNote }),
       walkIn ? shareNote : null,
       group({
         title: walkIn ? 'Customer details' : 'Your details',
         items: [field('Name', name), field('Email', email), field('Mobile', phone), cell({ title: 'Players', value: players.valueEl, right: players })],
         foot: walkIn
-          ? 'Used to find the booking and to reach the customer if plans change.'
-          : 'The club uses these to find your booking and to reach you if plans change.',
+          ? 'Used to find the booking and to reach the customer if plans change. Walk-ins can be for any number of players.'
+          : `Online bookings are for ${playersText()} per court. The club uses your details to find your booking and to reach you if plans change.`,
       }),
       group({ title: 'Notes', items: [field(null, notes, { stack: true })] }),
       methods.length
@@ -1265,24 +1188,19 @@
     if (!methods.length) submit.disabled = true;
 
     function refresh() {
-      durSeg.disable((d) => !fits(S.court, d));
-      if (!fits(S.court, S.duration)) {
-        S.duration = CFG.durations.find((d) => fits(S.court, d));
-        durSeg.set(S.duration);
-      }
-      const end = startMin + S.duration;
+      const peak = !S.plus && CFG.peakEnabled && open < toMin(CFG.peakEnd) && open + minutes > toMin(CFG.peakStart);
+      sessionNote.textContent = `${courtName(S.court)} is yours for the whole session, ${sessionText()}.` +
+        (peak ? ` The peak rate of ${fmt.money(CFG.peakPricePerHour)} per player per hour applies ${fmt.range(CFG.peakStart, CFG.peakEnd)}.` : '');
       if (walkIn) {
-        const shared = overlapping(S.court, S.duration, busy.filter((b) => b.kind !== 'blocked')).length;
-        const past = !isFutureStart(date, start);
+        const shared = onCourt(S.court).filter((b) => !isBlockItem(b)).length;
+        const past = !sessionOpen(date);
         shareNote.replaceChildren(...[
-          past ? banner('clock', `This time has passed. The walk-in will be recorded for ${fmt.dateLong(date)} at ${fmt.time(start)}.`) : null,
-          shared ? banner('people', `${courtName(S.court)} already has ${shared} booking${shared > 1 ? 's' : ''} at this time. The walk-in will share the court.`, 'warn') : null,
+          past ? banner('clock', `This date has passed. The walk-in will be recorded for ${fmt.dateLong(date)}.`) : null,
+          shared ? banner('people', `${courtName(S.court)} already has ${shared} booking${shared > 1 ? 's' : ''} on this date. The walk-in will share the court.`, 'warn') : null,
         ].filter(Boolean));
       }
-      const peak = !S.plus && CFG.peakEnabled && startMin < toMin(CFG.peakEnd) && end > toMin(CFG.peakStart);
-      endNote.textContent = `Ends at ${fmt.time(toTime(end))}${peak ? ` · Peak rate of ${fmt.money(CFG.peakPricePerHour)} per player per hour applies from ${fmt.time(CFG.peakStart)}` : ''}`;
-      total.textContent = fmt.money(priceFor(startMin, S.duration, S.players, S.plus));
-      breakdown.textContent = priceBreakdown(startMin, S.duration, S.players, S.plus);
+      total.textContent = fmt.money(priceFor(open, minutes, S.players, S.plus));
+      breakdown.textContent = priceBreakdown(open, minutes, S.players, S.plus);
       if (walkIn) {
         receiptField.hidden = !S.paid;
         methodNote.textContent = S.paid
@@ -1293,7 +1211,7 @@
         return;
       }
       methodNote.textContent = S.method === 'bank'
-        ? `You’ll see the bank details on the next screen. ${CFG.autoCancelHours ? `Unpaid bookings are released after ${CFG.autoCancelHours} hour${CFG.autoCancelHours > 1 ? 's' : ''}.` : 'We hold your slot while we wait for your payment.'}`
+        ? `You’ll see the bank details on the next screen. ${CFG.autoCancelHours ? `Unpaid bookings are released after ${CFG.autoCancelHours} hour${CFG.autoCancelHours > 1 ? 's' : ''}.` : 'We hold your court while we wait for your payment.'}`
         : 'Pay at the front desk before you play.';
     }
     refresh();
@@ -1316,7 +1234,7 @@
       submit.disabled = true;
       submit.textContent = 'Booking…';
       const body = {
-        date, court: S.court, start, duration: S.duration, players: S.players, paymentMethod: S.method,
+        date, court: S.court, players: S.players, paymentMethod: S.method,
         name: name.value.trim(), email: email.value.trim(), phone: phone.value.trim(), notes: notes.value.trim(),
         plus: staff && S.plus,
       };
@@ -1618,14 +1536,14 @@
     if (c.contactEmail) contact.push(cell({ ic: 'mail', c: 'blue', title: h('a', { href: `mailto:${c.contactEmail}`, text: c.contactEmail }), right: copyBtn(c.contactEmail, 'Email copied') }));
 
     const hours = [
-      cell({ ic: 'clock', title: 'Open daily', value: fmt.range(c.openTime, c.closeTime) }),
+      cell({ ic: 'clock', title: 'Session (open daily)', value: sessionText() }),
       cell({ ic: 'tag', title: 'Rate per player', value: `${fmt.money(c.pricePerHour)} / hour` }),
     ];
     if (c.peakEnabled) hours.push(cell({ ic: 'tag', c: 'orange', title: `Peak rate per player (${fmt.range(c.peakStart, c.peakEnd)})`, value: `${fmt.money(c.peakPricePerHour)} / hour` }));
     hours.push(
-      cell({ ic: 'calendar', title: 'Booking lengths', value: c.durations.map(fmt.dur).join(', ') }),
+      cell({ ic: 'calendar', title: 'Each booking', value: 'Whole session, one court' }),
       cell({ ic: 'calPlus', title: 'Book ahead', value: `Up to ${c.advanceDays} days` }),
-      cell({ ic: 'people', title: 'Players per court', value: `Up to ${c.maxPlayers}` }));
+      cell({ ic: 'people', title: 'Players per court', value: playersText() }));
 
     const pay = [];
     if (c.payment.bankTransfer) pay.push(cell({ ic: 'bank', c: 'blue', title: 'Bank transfer', sub: c.payment.bank ? `${c.payment.bank.bankName} · ${c.payment.bank.accountName}` : null }));
@@ -1636,15 +1554,15 @@
       contact.length ? group({ title: 'Contact', items: contact }) : null,
       h('div', { class: 'cols c-1-1' },
         h('div', { class: 'stack' },
-          group({ title: 'Hours and prices', items: hours, foot: 'Total = number of players × hours × rate per hour.' }),
+          group({ title: 'Hours and prices', items: hours, foot: `A booking is for a date and a court, for the whole session. Total = number of players × ${fmt.dur(sessionMinutes())} × rate per hour.` }),
           group({ title: 'Courts', items: c.courts.map((ct) => cell({ ic: 'court', title: ct.name })) })),
         h('div', { class: 'stack' },
           group({
             title: 'How booking works',
             items: [h('div', { class: 'steps' },
               ...[
-                ['Pick an open slot', 'Choose a day and tap an open time on the Book tab.'],
-                ['Add your details', 'Enter your name, email and mobile number.'],
+                ['Pick a date and a court', `Choose a day on the Book tab, then an available court. You get the court for the whole session, ${fmt.range(c.openTime, c.closeTime)}.`],
+                ['Add your details', `Enter your name, email and mobile number, and how many are playing (${playersText()}).`],
                 ['Pay', c.payment.bankTransfer ? 'Transfer the amount using your booking reference, or pay at the venue if offered.' : 'Pay at the front desk before you play.'],
                 ['Manage it', 'Find, add to calendar or cancel your booking under My Bookings.'],
               ].map(([t, d], i) => h('div', { class: 'step' }, h('span', { class: 'n', text: String(i + 1) }), h('div', null, h('strong', { text: t }), h('p', { text: d })))))],
@@ -1653,7 +1571,7 @@
             title: 'Policies',
             items: [
               cell({ ic: 'x', c: 'red', title: 'Cancellations', sub: cancelPolicyText() }),
-              cell({ ic: 'clock', c: 'orange', title: 'Unpaid bookings', sub: c.autoCancelHours ? `Bank transfer bookings not paid within ${c.autoCancelHours} hour${c.autoCancelHours > 1 ? 's' : ''} are released for others.` : 'Your slot is held until the club confirms your payment.' }),
+              cell({ ic: 'clock', c: 'orange', title: 'Unpaid bookings', sub: c.autoCancelHours ? `Bank transfer bookings not paid within ${c.autoCancelHours} hour${c.autoCancelHours > 1 ? 's' : ''} are released for others.` : 'Your court is held until the club confirms your payment.' }),
             ],
           }),
           pay.length ? group({ title: 'Payment options', items: pay }) : null,
@@ -1888,12 +1806,12 @@
       type: isEdit ? e.type : init.type || 'booking',
       date: e.date || init.date || CFG.now.date,
       court: e.court || init.court || 1,
-      start: e.start || init.start || CFG.openTime,
-      duration: e.duration || CFG.durations[0] || 60,
+      start: e.start || CFG.openTime,
+      duration: e.duration || sessionMinutes(),
       name: e.name || '',
       email: e.email || '',
       phone: e.phone || '',
-      players: e.players || Math.min(4, CFG.maxPlayers),
+      players: e.players || 4,
       notes: e.notes || '',
       paymentMethod: e.paymentMethod === 'bank' ? 'bank' : 'venue',
       paymentStatus: e.paymentStatus && e.paymentStatus !== 'n/a' ? e.paymentStatus : 'unpaid',
@@ -1902,39 +1820,22 @@
       plus: Boolean(e.plus),
     };
     let amountTouched = isEdit;
-    const open = toMin(CFG.openTime);
-    const close = toMin(CFG.closeTime);
-    if (toMin(S.start) < open || toMin(S.start) >= close) S.start = CFG.openTime;
+    const session = { start: CFG.openTime, duration: sessionMinutes() };
     if (!isEdit) {
-      // New bookings start at the next open half hour: never a date or time that has passed.
+      // New bookings are for the whole session, on a date whose session hasn't ended.
       const now = clubNow();
-      if (S.date < now.date) S.date = now.date;
-      if (S.date === now.date && toMin(S.start) <= now.minutes) {
-        const next = Math.max(open, Math.floor(now.minutes / 30) * 30 + 30);
-        if (next <= close - 30) S.start = toTime(next);
-        else {
-          S.date = addDays(now.date, 1);
-          S.start = CFG.openTime;
-        }
-      }
+      if (!sessionOpen(S.date, now)) S.date = sessionOpen(now.date, now) ? now.date : addDays(now.date, 1);
     }
-    const pastMessage = 'That time has already passed. Choose a later time today or a future date.';
-    // An existing booking may keep its own (possibly past) slot; anything else must be in the future.
-    const keepsOwnSlot = (date, start) => isEdit && date === e.date && start === e.start;
-    // Walk-ins can be recorded or moved to any date and time, past included.
+    const pastMessage = 'That date’s session has already ended. Choose today (before closing time) or a future date.';
+    // Walk-ins can be recorded or moved to any date, past included.
     const pastOk = isEdit && e.source === 'walkin';
-    const startSel = h('select', { onchange: (ev) => { S.start = ev.target.value; syncTimes(); } });
-
-    function syncStartOptions() {
-      const now = clubNow();
-      const options = timeOptions(open, close - 30).map((o) => ({ ...o, disabled: !pastOk && !isFutureStart(S.date, o.value, now) && !keepsOwnSlot(S.date, o.value) }));
-      startSel.replaceChildren(...options.map((o) => h('option', { value: o.value, text: o.label, disabled: o.disabled || null })));
-      const current = options.find((o) => o.value === S.start);
-      if (!current || current.disabled) {
-        const firstOpen = options.find((o) => !o.disabled);
-        if (firstOpen) S.start = firstOpen.value;
-      }
-      startSel.value = S.start;
+    // A booking moved to another date or court becomes a whole-session booking;
+    // otherwise an existing booking keeps its original time.
+    const isMoved = () => !isEdit || S.date !== e.date || S.court !== e.court;
+    function applySession() {
+      const keep = !isMoved();
+      S.start = keep ? e.start : session.start;
+      S.duration = keep ? e.duration : session.duration;
     }
 
     const sh = openSheet({ title: '', guard: true });
@@ -1944,7 +1845,7 @@
     sh.setRight(saveBtn);
 
     const amountIn = h('input', { type: 'number', inputmode: 'decimal', min: 0, step: '0.01', class: 'right', oninput: () => { amountTouched = true; syncPrice(); } });
-    const durSel = h('select');
+    const timeValue = h('span');
     const endNote = h('p', { class: 'group-foot' });
     const priceNote = h('div', { class: 'group-foot price-note' });
 
@@ -1960,12 +1861,11 @@
     }
 
     function syncTimes() {
-      const s = toMin(S.start);
-      const max = close - s;
-      durSel.replaceChildren(...Array.from({ length: Math.max(1, Math.floor(max / 30)) }, (_, i) => (i + 1) * 30).map((d) => h('option', { value: d, text: fmt.dur(d) })));
-      if (S.duration > max) S.duration = Math.max(30, Math.floor(max / 30) * 30);
-      durSel.value = String(S.duration);
-      endNote.textContent = `Ends at ${fmt.time(toTime(s + S.duration))}.`;
+      applySession();
+      timeValue.textContent = `${fmt.range(S.start, toTime(toMin(S.start) + S.duration))} (${fmt.dur(S.duration)})`;
+      endNote.textContent = S.start === session.start && S.duration === session.duration
+        ? 'Whole session: opening to closing time from Settings.'
+        : 'This booking keeps its original time. Changing the date or court makes it a whole-session booking.';
       syncPrice();
     }
 
@@ -1976,12 +1876,9 @@
         onchange: (ev) => {
           if (!ev.target.value) return;
           S.date = ev.target.value;
-          syncStartOptions();
           syncTimes();
         },
       });
-      syncStartOptions();
-      durSel.onchange = () => { S.duration = Number(durSel.value); syncTimes(); };
       const nodes = [errBox];
       if (!isEdit) {
         nodes.push(h('div', null, seg([{ value: 'booking', label: 'Booking' }, { value: 'block', label: 'Block time' }], S.type, (v) => { S.type = v; build(); }, 'Type')));
@@ -1991,9 +1888,8 @@
         title: 'When',
         items: [
           field('Date', dateIn),
-          CFG.courts.length > 1 ? h('div', { class: 'seg-cell' }, seg(CFG.courts.map((c) => ({ value: c.id, label: c.name })), S.court, (v) => { S.court = v; }, 'Court')) : null,
-          field('Starts', startSel),
-          field('Length', durSel),
+          CFG.courts.length > 1 ? h('div', { class: 'seg-cell' }, seg(CFG.courts.map((c) => ({ value: c.id, label: c.name })), S.court, (v) => { S.court = v; syncTimes(); }, 'Court')) : null,
+          row('Time', timeValue),
         ],
         foot: endNote,
       }));
@@ -2005,7 +1901,7 @@
         const name = h('input', { maxlength: 80, placeholder: 'Required', value: S.name, autocomplete: 'off', oninput: (ev) => { S.name = ev.target.value; } });
         const email = h('input', { type: 'email', maxlength: 120, placeholder: 'Optional', value: S.email, autocomplete: 'off', oninput: (ev) => { S.email = ev.target.value; } });
         const phone = h('input', { type: 'tel', maxlength: 30, placeholder: 'Optional', value: S.phone, autocomplete: 'off', oninput: (ev) => { S.phone = ev.target.value; } });
-        const players = stepper({ value: S.players, min: 1, max: 8, label: 'Players', onChange: (v) => { S.players = v; syncPrice(); } });
+        const players = stepper({ value: S.players, min: 1, max: 12, label: 'Players', onChange: (v) => { S.players = v; syncPrice(); } });
         const notes = h('textarea', { maxlength: 300, 'aria-label': 'Notes', placeholder: 'Notes (optional)', value: S.notes, oninput: (ev) => { S.notes = ev.target.value; } });
         const ref = h('input', { maxlength: 60, placeholder: 'Optional', value: S.paymentReference, oninput: (ev) => { S.paymentReference = ev.target.value; } });
         nodes.push(group({ title: 'Player', items: [field('Name', name), field('Email', email), field('Mobile', phone), cell({ title: 'Players', value: players.valueEl, right: players }), field(null, notes, { stack: true })] }));
@@ -2034,8 +1930,8 @@
         sh.body.scrollTop = 0;
         return;
       }
-      const moved = !isEdit || S.date !== e.date || S.start !== e.start || S.court !== e.court;
-      if (moved && !pastOk && !isFutureStart(S.date, S.start)) {
+      const moved = isMoved();
+      if (moved && !pastOk && !sessionOpen(S.date)) {
         errBox.replaceChildren(banner('alert', pastMessage, 'error'));
         sh.body.scrollTop = 0;
         return;
@@ -2066,13 +1962,14 @@
     }
   }
 
+  // Badges sit under the details so names and times keep the full width on phones.
   function staffBookingCell(b, { showDate, onChanged }) {
     return cell({
       title: b.type === 'block' ? `${b.name} (blocked)` : b.name,
-      sub: [showDate ? fmt.date(b.date) : null, fmt.range(b.start, b.end), courtName(b.court), b.type === 'booking' ? b.ref : null].filter(Boolean).join(' · '),
-      value: h('span', { style: { display: 'grid', justifyItems: 'end', gap: '4px' } },
-        b.type === 'booking' ? h('span', { class: 'num', style: { color: 'var(--label)' }, text: fmt.money(b.amount, b.currency) }) : null,
-        h('span', { class: 'chips', style: { justifyContent: 'flex-end' } }, walkInChip(b), plusChip(b), chip(STATUS, b.status), b.type === 'booking' && b.status !== 'cancelled' ? chip(PAY, b.paymentStatus) : null)),
+      sub: h('span', { style: { display: 'grid', gap: '6px' } },
+        h('span', { text: [showDate ? fmt.date(b.date) : null, fmt.range(b.start, b.end), courtName(b.court), b.type === 'booking' ? b.ref : null].filter(Boolean).join(' · ') }),
+        h('span', { class: 'chips' }, walkInChip(b), plusChip(b), chip(STATUS, b.status), b.type === 'booking' && b.status !== 'cancelled' ? chip(PAY, b.paymentStatus) : null)),
+      value: b.type === 'booking' ? h('span', { class: 'num', style: { color: 'var(--label)' }, text: fmt.money(b.amount, b.currency) }) : null,
       chevron: true,
       onClick: () => openStaffDetail(b, onChanged),
     });
@@ -2211,7 +2108,6 @@
   // =====================================================================================
 
   let schedDate = null;
-  let schedMode = 'grid';
 
   async function viewSchedule(main) {
     const today = CFG.now.date;
@@ -2224,14 +2120,12 @@
     const strip = dateStrip({ from: addDays(today, -14), to: addDays(today, Math.max(60, CFG.advanceDays)), value: schedDate, onPick: (d) => { schedDate = d; load(); } });
     const picker = datePicker({ value: schedDate, onPick: (d) => { schedDate = d; load(); } });
     const todayBtn = h('button', { type: 'button', class: 'btn btn-sm btn-gray', text: 'Today', onclick: () => { schedDate = CFG.now.date; load(); } });
-    const modeSeg = seg([{ value: 'grid', label: 'Courts' }, { value: 'list', label: 'List' }], schedMode, (v) => { schedMode = v; draw(); }, 'View');
-    modeSeg.classList.add('inline');
     const searchIn = h('input', { type: 'search', placeholder: 'Search name, email, phone or reference', 'aria-label': 'Search all bookings' });
     const summary = h('div', { class: 'subtitle' });
     const box = h('div', { class: 'stack', style: { gap: '12px' } }, loading());
     const dayControls = h('div', { class: 'stack', style: { gap: '12px' } },
       h('section', { class: 'datebar', 'aria-label': 'Date' }, h('div', { class: 'datebar-row' }, title, h('div', { class: 'inline-actions' }, todayBtn, picker)), strip),
-      h('div', { class: 'datebar-row' }, modeSeg, summary));
+      summary);
     pg.content.append(
       h('div', { class: 'search' }, icon('search'), searchIn),
       dayControls,
@@ -2271,19 +2165,11 @@
         ...(cancelled ? [h('span', { text: `${cancelled} cancelled` })] : []));
       const closed = closedOn(schedDate);
       const notice = closed ? closedBanner(schedDate, closed.name) : null;
-      if (schedMode === 'grid') {
-        box.replaceChildren(...[notice, scheduleGrid({
-          date: schedDate, now, busy: active, staff: true, closedName: closed && closed.name,
-          onFree: (court, start) => openStaffEditor({ init: { date: schedDate, court, start }, onSaved: () => load() }),
-          onItem: (b) => openStaffDetail(b, () => load()),
-        })].filter(Boolean));
-      } else if (!data.length) {
-        box.replaceChildren(...[notice, emptyState('calendar', 'No bookings on this day', closed ? null : 'Add a booking for a walk-in or phone call, or block time for maintenance.',
-          closed ? null : h('button', { type: 'button', class: 'btn btn-tinted', onclick: () => openStaffEditor({ init: { date: schedDate }, onSaved: () => load() }) }, icon('plus'), 'New Booking'))].filter(Boolean));
-      } else {
-        const sorted = [...data].sort((a, b) => (a.start + a.court).localeCompare(b.start + b.court));
-        box.replaceChildren(...[notice, group({ items: sorted.map((b) => staffBookingCell(b, { onChanged: () => load() })) })].filter(Boolean));
-      }
+      box.replaceChildren(...[notice, staffCourtDay({
+        date: schedDate, now, bookings: data, closedName: closed && closed.name,
+        onAdd: (court) => openStaffEditor({ init: { date: schedDate, court }, onSaved: () => load() }),
+        onChanged: () => load(),
+      })].filter(Boolean));
     }
 
     let searchTimer;
@@ -2505,7 +2391,6 @@
           h('td', { class: 'r', text: fmt.money(g.billed, cur) }), h('td', { class: 'r', text: fmt.money(g.collected, cur) }))))));
 
       const byMethod = r.byMethod.map((g) => ({ ...g, label: METHOD[g.key] }));
-      const hoursItems = r.byHour.map((x) => ({ k: fmt.hour(x.hour), v: x.bookings }));
       const dayItems = [1, 2, 3, 4, 5, 6, 0].map((d) => ({ k: fmt.dowLong(d), v: r.byWeekday.find((x) => x.day === d).bookings }));
 
       const sorted = r.rows;
@@ -2546,9 +2431,7 @@
               title: g.key === 'walkin' ? walkInChip({ source: 'walkin' }) : (SOURCE_FILTERS.find(([v]) => v === g.key) || [g.key, g.key])[1],
               g,
             })), cur))),
-        h('div', { class: 'cols c-1-1' },
-          h('section', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', { class: 'card-title', text: 'Busiest start times' })), hbars(hoursItems)),
-          h('section', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', { class: 'card-title', text: 'By day of week' })), hbars(dayItems))),
+        h('section', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', { class: 'card-title', text: 'By day of week' })), hbars(dayItems)),
         h('section', { class: 'group stack', style: { gap: '10px' } },
           h('div', { class: 'filter-summary' },
             h('h2', { class: 'group-title big', style: { padding: '0' }, text: `Booking list (${fmt.num(sorted.length)})` }),
@@ -2661,43 +2544,33 @@
     }
 
     function hoursSection() {
-      const slotSeg = seg([{ value: 30, label: 'Every 30 min' }, { value: 60, label: 'Every hour' }], D.slotMinutes, (v) => {
-        D.slotMinutes = v;
-        D.durations = D.durations.filter((d) => d % v === 0);
-        if (!D.durations.length) D.durations = [60];
-        changed();
-        slots.hours();
-      }, 'Start times');
-      const choices = h('div', { class: 'choices', role: 'group', 'aria-label': 'Booking lengths players can choose' },
-        res.durationChoices.map((d) => h('button', {
-          type: 'button', class: 'choice', id: 'set-dur-' + d, 'aria-pressed': String(D.durations.includes(d)), disabled: d % D.slotMinutes ? true : null, text: fmt.dur(d),
-          onclick: () => {
-            D.durations = D.durations.includes(d) ? D.durations.filter((x) => x !== d) : [...D.durations, d].sort((a, b) => a - b);
-            changed();
-            slots.hours();
-          },
-        })));
-      const players = stepper({ id: 'set-players', value: D.maxPlayers, min: 1, max: 8, label: 'Players per court', onChange: (v) => { D.maxPlayers = v; changed(); } });
+      const minPlayers = stepper({
+        id: 'set-min-players', value: D.minPlayers, min: 1, max: 12, label: 'Minimum players per court',
+        onChange: (v) => { D.minPlayers = v; if (D.maxPlayers < v) D.maxPlayers = v; changed(); slots.hours(); },
+      });
+      const maxPlayers = stepper({
+        id: 'set-max-players', value: D.maxPlayers, min: 1, max: 12, label: 'Maximum players per court',
+        onChange: (v) => { D.maxPlayers = v; if (D.minPlayers > v) D.minPlayers = v; changed(); slots.hours(); },
+      });
+      const sessionMins = toMin(D.closeTime) - toMin(D.openTime);
       return h('div', { class: 'stack' },
         group({
           title: 'Opening hours',
-          items: [field('Opens', timeSel('openTime', 0, 23 * 60)), field('Closes', timeSel('closeTime', 60, 1440)), h('div', { class: 'seg-cell' }, slotSeg)],
-          foot: 'Start times are the slots players can tap on the booking grid.',
-        }),
-        group({
-          title: 'Booking lengths',
-          items: [choices],
-          foot: D.durations.length ? `Players can book ${D.durations.map(fmt.dur).join(', ')}.` : 'Choose at least one booking length.',
+          items: [field('Opens', timeSel('openTime', 0, 23 * 60, 'hours')), field('Closes', timeSel('closeTime', 60, 1440, 'hours'))],
+          foot: sessionMins > 0
+            ? `Each booking is for the whole session: ${fmt.range(D.openTime, D.closeTime)} (${fmt.dur(sessionMins)}). Players pick a date and a court only.`
+            : 'Closing time must be after opening time.',
         }),
         group({
           title: 'Booking rules',
           items: [
-            cell({ title: 'Players per court', value: players.valueEl, right: players }),
+            cell({ title: 'Minimum players', sub: 'Per court, online bookings', value: minPlayers.valueEl, right: minPlayers }),
+            cell({ title: 'Maximum players', sub: 'Per court, online bookings', value: maxPlayers.valueEl, right: maxPlayers }),
             field('Book ahead', h('span', { style: { display: 'flex', alignItems: 'center', gap: '8px', flex: '1' } }, number('advanceDays', { min: 1, max: 365 }), h('span', { class: 'unit', text: 'days' }))),
             field('Cancel online', h('span', { style: { display: 'flex', alignItems: 'center', gap: '8px', flex: '1' } }, number('cancelCutoffHours', { min: 0, max: 168 }), h('span', { class: 'unit', text: 'hrs before' }))),
             field('Release unpaid', h('span', { style: { display: 'flex', alignItems: 'center', gap: '8px', flex: '1' } }, number('autoCancelHours', { min: 0, max: 168 }), h('span', { class: 'unit', text: 'hrs after' }))),
           ],
-          foot: 'Release unpaid: bank transfer bookings with no payment after this many hours are cancelled automatically, freeing the court. Enter 0 to keep them until you cancel them.',
+          foot: `Online bookings need ${D.minPlayers === D.maxPlayers ? D.maxPlayers : `${D.minPlayers} to ${D.maxPlayers}`} players per court; walk-ins aren’t limited. Release unpaid: bank transfer bookings with no payment after this many hours are cancelled automatically, freeing the court. Enter 0 to keep them until you cancel them.`,
         }));
     }
 

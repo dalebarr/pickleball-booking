@@ -6,9 +6,11 @@ everything from a dashboard. It looks and feels like an iPhone app, and it works
 ## What it does
 
 **For players** (the public booking site)
-- See open courts for any day on a live court-by-time grid, then tap an open slot to book.
-- Choose the court, how long to play and how many players. The price updates as they choose:
-  **total = number of players × hours × rate per hour** (hours inside peak time use the peak rate).
+- Pick a **date**, then an available **court**. Each booking is for the whole session, from the opening to the closing
+  time set in Settings; there are no time slots or booking lengths to choose.
+- Online bookings are for **4 to 6 players per court** (set in Settings). The price updates as they choose:
+  **total = number of players × session hours × rate per hour** (hours inside peak time use the peak rate).
+- Today can be booked until closing time.
 - Pay by **bank transfer** (they're shown the club's bank details and a booking reference) or **at the venue**.
 - After paying by transfer, send the transfer reference so staff can match the payment.
 - **My Bookings**: find a booking by reference and email, add it to their calendar, or cancel it (within the club's cancellation window).
@@ -18,17 +20,17 @@ everything from a dashboard. It looks and feels like an iPhone app, and it works
 **For staff** (`/#/admin`, password protected)
 - **Dashboard**: today's bookings, court use, money collected this month, payments to check, a 14-day revenue/bookings
   chart, a live "courts today" timeline, payments to verify, and upcoming bookings.
-- **Schedule**: day-by-day court grid or list. Add walk-in or phone bookings, block time for maintenance or clinics, and
-  search every booking by name, email, phone or reference.
-- **Walk-in** (staff only): book customers who arrive at the desk, using the same court grid, details and rules as
-  online booking (offered lengths and start times, players per court, PLUS reserve). Staff can pick any date, past or
-  future (the players' booking window doesn't apply), and any time within opening hours, including times that have
-  passed (to record a walk-in after the fact) and times that are already booked: the walk-in shares the court. Blocked
-  time and closed dates stay unavailable. Signed-in staff can also book any date from today onwards on the Book a Court page. Staff can record "Paid now" with a receipt number. Walk-ins are
-  labelled in lists and can be filtered in reports.
+- **Schedule**: day by day, one card per court with its bookings. Add phone bookings or block a court for the day
+  (maintenance, clinics), and search every booking by name, email, phone or reference.
+- **Walk-in** (staff only): book customers who arrive at the desk by picking a date and a court, with the same details
+  as online booking and the PLUS reserve option. Walk-ins aren't limited to 4–6 players. Staff can pick any date, past
+  or future (the players' booking window doesn't apply), including a court that is already booked: the walk-in shares
+  the court. Blocked courts and closed dates stay unavailable. Signed-in staff can also book any date from today onwards
+  on the Book a Court page. Staff can record "Paid now" with a receipt number. Walk-ins are labelled in lists and can be
+  filtered in reports.
 - **Holidays and closures** (Settings): close or reopen the club on New Zealand public holidays (this year and next,
   including Mondayised days and Matariki) or on special dates you add, such as your regional anniversary day. Closed
-  dates can't be booked by anyone and are shown as closed on every booking grid and on Club Info.
+  dates can't be booked by anyone and are shown as closed on every booking page and on Club Info.
 - **Booking actions**: confirm, mark paid or unpaid, check in, no-show, cancel, restore, refund, move or edit, with a history of changes.
 - **PLUS reserve** (staff only): a switch when booking or blocking time, including on the public booking page while a staff
   member is signed in. A PLUS reserve is charged players × hours × the PLUS reserve rate instead of the regular and peak
@@ -36,13 +38,13 @@ everything from a dashboard. It looks and feels like an iPhone app, and it works
 - **Reports**: unfiltered ("All records") or filtered by period (today, this week, this month, last month, custom range and more),
   court, status, payment status, payment method, PLUS reserve, channel (online, walk-in, staff) and text search. Shows totals,
   court use, value booked and collected, outstanding money, a by-day/by-month chart, breakdowns by court, status, payment,
-  rate, channel, busiest start times and day of week,
+  rate, channel and day of week,
   plus the full booking list. **Export to CSV** (opens in Excel or Google Sheets) or **print**.
 - **Settings**:
   - **Number of courts**: minimum 1, maximum 3, with a name for each court.
   - **Bank accounts**: save one or more accounts and choose which one players pay into. Unpaid bookings switch to the new account straight away.
-  - Opening hours, start-time interval (30 or 60 minutes), allowed booking lengths, players per court, how far ahead people can book,
-    cancellation cutoff, automatic release of unpaid bookings.
+  - Opening hours (the booking session), minimum and maximum players per court for online bookings, how far ahead
+    people can book, cancellation cutoff, automatic release of unpaid bookings.
   - Rate per player per hour, optional peak rate and hours, PLUS reserve rate (staff only), currency, time zone.
   - Payment options (bank transfer and/or pay at venue) and payment instructions.
   - Change password, download a backup, sign out.

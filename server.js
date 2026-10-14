@@ -326,7 +326,6 @@ route('POST', '/api/admin/password', ({ req, res, body }) => {
 route('GET', '/api/admin/settings', () => ({
   settings: state.settings,
   currencies: B.CURRENCIES,
-  durationChoices: B.DURATION_CHOICES,
   limits: { minCourts: B.MIN_COURTS, maxCourts: B.MAX_COURTS },
   // New Zealand public holidays for this year and next, to close or reopen in Settings.
   holidays: (() => {
@@ -518,6 +517,11 @@ async function start() {
   backend = createBackend({ databaseUrl: process.env.DATABASE_URL, dataDir: DATA_DIR });
   const loaded = await backend.load();
   state = B.normalizeState(loaded);
+  if (state.migrated) {
+    // Older data was upgraded (e.g. whole-session bookings, 4 to 6 players online): save it.
+    delete state.migrated;
+    if (loaded) saveMeta();
+  }
   if (!loaded) {
     if (process.env.TZ_DEFAULT && U.isValidTimeZone(process.env.TZ_DEFAULT)) state.settings.timezone = process.env.TZ_DEFAULT;
     if (backend.saveAll) await backend.saveAll(state); else saveMeta();
