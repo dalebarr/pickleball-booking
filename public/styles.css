@@ -618,6 +618,26 @@ button.cell:focus-visible, a.cell:focus-visible { outline-offset: -3px; }
 .summary-head .meta > span { display: inline-flex; align-items: center; gap: 5px; }
 .summary-head .meta .ico { width: 16px; height: 16px; }
 
+/* ---- Club info: sized from the page's own width, not the window ---- */
+.info { container: info / inline-size; display: flex; flex-direction: column; gap: 26px; min-width: 0; }
+.info-cols { display: grid; gap: 26px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+@container info (min-width: 760px) { .info-cols { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+@container info (min-width: 1000px) { .info-cols { gap: 32px; } }
+.info .list { container: infolist / inline-size; }
+.info .cell-title, .info .cell-sub { overflow-wrap: break-word; }
+
+/* Label and value rows: both sides share the width in proportion and wrap between words. */
+.cell.kv { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); column-gap: 12px; }
+.cell.kv.has-icon { grid-template-columns: 30px minmax(0, 1fr) minmax(0, 1.25fr); }
+.cell.kv .cell-value { overflow-wrap: break-word; text-wrap: balance; }
+/* Narrow lists (phones, or a half-width column): the value goes under its label. */
+@container infolist (max-width: 400px) {
+  .cell.kv, .cell.kv.has-icon { grid-template-columns: minmax(0, 1fr); row-gap: 3px; }
+  .cell.kv.has-icon { grid-template-columns: 30px minmax(0, 1fr); }
+  .cell.kv.has-icon .cell-icon { grid-row: 1 / span 2; align-self: center; }
+  .cell.kv .cell-value { grid-column: -2; justify-content: flex-start; text-align: left; margin-left: 0; color: var(--label); font-weight: 500; }
+}
+
 .steps { display: grid; gap: 0; }
 .step { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 12px; padding: 12px 16px; align-items: start; }
 .step .n { width: 26px; height: 26px; border-radius: 50%; background: var(--tint-soft); color: var(--tint); font-weight: 700; font-size: 14px; display: grid; place-items: center; }

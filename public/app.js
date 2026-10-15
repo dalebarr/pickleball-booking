@@ -737,12 +737,12 @@
 
   /**
    * One row per court for a date, for players (online) and walk-ins.
-   * Online: a court is bookable when nothing is on it and the session hasn't ended.
-   * Walk-ins (`share`): a booked court stays selectable (the walk-in shares it) and
-   * past dates are allowed. Blocked courts and closed dates are never selectable.
+   * Bookings don't lock a court: a court that is already booked stays bookable and
+   * the bookings share it. Online bookings need a session that hasn't ended;
+   * walk-ins may use past dates. Blocked courts and closed dates are never selectable.
    */
-  function courtDayList({ date, now, busy, share, closedName, onPick }) {
-    const ended = !sessionOpen(date, now);
+  function courtDayList({ date, now, busy, walkIn, closedName, onPick }) {
+    const over = !sessionOpen(date, now);
     const items = CFG.courts.map((c) => {
       const onCourt = busy.filter((b) => b.court === c.id);
       const blocked = onCourt.some(isBlockItem);
@@ -752,20 +752,22 @@
       let available = false;
       if (closedName) { status = `Closed for ${closedName}`; tag = 'Closed'; }
       else if (blocked) { status = 'Not available: blocked by the club'; tag = 'Unavailable'; }
-      else if (share) {
+      else if (over && !walkIn) { status = 'Today’s session has ended'; tag = 'Ended'; }
+      else {
         available = true;
-        status = booked ? `Already booked (${booked}). The walk-in will share the court.` : ended ? 'Open · this date has passed' : 'Open';
-      } else if (booked) { status = 'Already booked'; tag = 'Booked'; }
-      else if (ended) { status = 'Today’s session has ended'; tag = 'Ended'; }
-      else { available = true; status = 'Available'; }
-      const action = share ? 'Add Walk-in' : 'Book';
+        status = [
+          booked ? `Available · ${booked} booking${booked > 1 ? 's' : ''} already` : 'Available',
+          over ? 'this date has passed' : null,
+        ].filter(Boolean).join(' · ');
+      }
+      const action = walkIn ? 'Add Walk-in' : 'Book';
       return cell({
         ic: 'court', c: !available ? 'gray' : booked ? 'orange' : 'tint',
         title: c.name,
         sub: `${status} · ${sessionRange(date)}`,
         right: available
           ? h('span', { class: 'btn btn-sm btn-filled', 'aria-hidden': 'true' }, action)
-          : h('span', { class: 'chip', 'data-c': tag === 'Booked' ? 'orange' : 'gray' }, h('span', { class: 'dot' }), tag),
+          : h('span', { class: 'chip', 'data-c': 'gray' }, h('span', { class: 'dot' }), tag),
         onClick: available ? () => onPick(c.id) : null,
         label: available ? `${c.name}: ${status}. ${action}` : null,
       });
@@ -782,7 +784,7 @@
       const blocked = active.some(isBlockItem);
       const tag = closedName ? ['Closed', 'gray'] : blocked ? ['Blocked', 'indigo'] : active.length ? [`${active.length} booking${active.length === 1 ? '' : 's'}`, 'orange'] : ['Available', 'green'];
       const items = onCourt.map((b) => staffBookingCell(b, { onChanged }));
-      if (canAdd && !active.length) {
+      if (canAdd && !blocked) {
         items.push(cell({ ic: 'plus', title: 'New Booking', sub: `Whole session, ${sessionText(date)}`, cls: 'tint', onClick: () => onAdd(c.id) }));
       }
       if (!items.length) items.push(cell({ title: closedName ? `Closed for ${closedName}` : 'No bookings', sub: closedName ? null : 'This session has ended.' }));
@@ -1087,7 +1089,7 @@
         courtsBox.replaceChildren(...[
           av.closed ? closedBanner(date, av.closed) : null,
           courtDayList({
-            date, now: av.now, busy: av.busy, share: walkIn, closedName: av.closed,
+            date, now: av.now, busy: av.busy, walkIn, closedName: av.closed,
             onPick: (court) => openBookSheet({ date, court, busy: av.busy, walkIn, onBooked: () => load(true) }),
           }),
         ].filter(Boolean));
@@ -1112,8 +1114,8 @@
     // Staff book for customers, so the form never fills in details saved on this device.
     const saved = staff ? {} : prefs.get('player', {});
     const onCourt = (c) => busy.filter((b) => b.court === c);
-    // Online: a court with anything on it is taken. Walk-ins only avoid blocked courts.
-    const usable = (c) => (walkIn ? !onCourt(c).some(isBlockItem) : !onCourt(c).length);
+    // Bookings don't lock a court; only blocked courts can't be chosen.
+    const usable = (c) => !onCourt(c).some(isBlockItem);
     // Players: online bookings need minPlayers–maxPlayers; walk-ins aren't limited.
     const minP = walkIn ? 1 : CFG.minPlayers;
     const maxP = walkIn ? 12 : CFG.maxPlayers;
@@ -1171,7 +1173,7 @@
         h('div', { class: 'meta' }, meta('clock', `Session ${sessionText(date)}`))),
       staff ? plusReserveGroup(S.plus, (v) => { S.plus = v; refresh(); }, false) : null,
       group({ title: 'Court', items: [CFG.courts.length > 1 ? h('div', { class: 'seg-cell' }, courtSeg) : row(CFG.courts[0].name, null)], foot: sessionNote }),
-      walkIn ? shareNote : null,
+      shareNote,
       group({
         title: walkIn ? 'Customer details' : 'Your details',
         items: [
@@ -1200,14 +1202,15 @@
 
     function refresh() {
       sessionNote.textContent = `${courtName(S.court)} is reserved for the ${isWeekend(date) ? 'weekend' : 'weekday'} session, ${sessionText(date)}. You pay for the booked hours.`;
-      if (walkIn) {
-        const shared = onCourt(S.court).filter((b) => !isBlockItem(b)).length;
-        const past = !sessionOpen(date);
-        shareNote.replaceChildren(...[
-          past ? banner('clock', `This date has passed. The walk-in will be recorded for ${fmt.dateLong(date)}.`) : null,
-          shared ? banner('people', `${courtName(S.court)} already has ${shared} booking${shared > 1 ? 's' : ''} on this date. The walk-in will share the court.`, 'warn') : null,
-        ].filter(Boolean));
-      }
+      // The court may already have bookings: they share it.
+      const shared = onCourt(S.court).filter((b) => !isBlockItem(b)).length;
+      const past = walkIn && !sessionOpen(date);
+      const sharedText = `${courtName(S.court)} already has ${shared} booking${shared > 1 ? 's' : ''} on this date. ` +
+        (walkIn ? 'The walk-in will share the court.' : 'You can still book it: the court is shared.');
+      shareNote.replaceChildren(...[
+        past ? banner('clock', `This date has passed. The walk-in will be recorded for ${fmt.dateLong(date)}.`) : null,
+        shared ? banner('people', sharedText, walkIn ? 'warn' : null) : null,
+      ].filter(Boolean));
       total.textContent = fmt.money(priceFor(S.hours, S.players, S.plus));
       breakdown.textContent = priceBreakdown(S.hours, S.players, S.plus);
       if (walkIn) {
@@ -1220,7 +1223,7 @@
         return;
       }
       methodNote.textContent = S.method === 'bank'
-        ? `You’ll see the bank details on the next screen. ${CFG.autoCancelHours ? `Unpaid bookings are released after ${CFG.autoCancelHours} hour${CFG.autoCancelHours > 1 ? 's' : ''}.` : 'We hold your court while we wait for your payment.'}`
+        ? `You’ll see the bank details on the next screen. ${CFG.autoCancelHours ? `Unpaid bookings are released after ${CFG.autoCancelHours} hour${CFG.autoCancelHours > 1 ? 's' : ''}.` : 'Your booking stays pending until the club confirms your payment.'}`
         : 'Pay at the front desk before you play.';
     }
     refresh();
@@ -1310,8 +1313,8 @@
     if (b.status === 'pending') {
       if (b.paymentStatus === 'submitted') return { c: 'blue', ic: 'clock', title: 'Payment sent', text: 'We’ll confirm your booking once the club has checked your transfer.' };
       return {
-        c: 'orange', ic: 'clock', title: 'Slot reserved',
-        text: `Transfer ${amount} to confirm your booking.${b.holdUntil ? ` We hold this slot until ${fmt.stamp(b.holdUntil)}.` : ''}`,
+        c: 'orange', ic: 'clock', title: 'Booking received',
+        text: `Transfer ${amount} to confirm your booking.${b.holdUntil ? ` Unpaid bookings are cancelled at ${fmt.stamp(b.holdUntil)}.` : ''}`,
       };
     }
     if (b.paymentStatus === 'paid') return { c: 'green', ic: 'check', title: 'You’re booked', text: 'Payment received. See you on court!' };
@@ -1355,7 +1358,7 @@
         onClick: async () => {
           const ok = await confirmDialog({
             title: 'Cancel this booking?',
-            message: `${fmt.date(b.date)}, ${fmt.range(b.start, b.end)} on ${b.courtName}. The court becomes available to other players.`,
+            message: `${fmt.date(b.date)}, ${fmt.range(b.start, b.end)} on ${b.courtName}.`,
             confirm: 'Cancel Booking', cancel: 'Keep', destructive: true,
           });
           if (!ok) return;
@@ -1546,14 +1549,16 @@
     if (c.contactEmail) contact.push(cell({ ic: 'mail', c: 'blue', title: h('a', { href: `mailto:${c.contactEmail}`, text: c.contactEmail }), right: copyBtn(c.contactEmail, 'Email copied') }));
 
     const span = (x) => `${fmt.range(x.open, x.close)} (${fmt.dur(toMin(x.close) - toMin(x.open))})`;
+    // Label and value rows (`kv`) share the row width in proportion and stack on narrow screens.
+    const kv = (o) => cell({ ...o, cls: 'kv' });
     const hours = [
-      cell({ ic: 'clock', title: 'Weekdays', sub: 'Monday to Thursday', value: span(c.hours.weekday) }),
-      cell({ ic: 'clock', c: 'indigo', title: 'Weekends', sub: 'Friday to Sunday', value: span(c.hours.weekend) }),
-      cell({ ic: 'tag', title: 'Rate per player', value: `${fmt.money(c.pricePerHour)} / hour` }),
-      cell({ ic: 'calendar', title: 'Each booking', value: 'One court for the day’s session' }),
-      cell({ ic: 'clock', c: 'orange', title: 'Booked hours', value: 'From 1 hour, in half hours' }),
-      cell({ ic: 'calPlus', title: 'Book ahead', value: `Up to ${c.advanceDays} days` }),
-      cell({ ic: 'people', title: 'Players per court', value: playersText() }),
+      kv({ ic: 'clock', title: 'Weekdays', sub: 'Monday to Thursday', value: span(c.hours.weekday) }),
+      kv({ ic: 'clock', c: 'indigo', title: 'Weekends', sub: 'Friday to Sunday', value: span(c.hours.weekend) }),
+      kv({ ic: 'tag', title: 'Rate per player', value: `${fmt.money(c.pricePerHour)} / hour` }),
+      kv({ ic: 'calendar', title: 'Each booking', value: 'One court for the day’s session' }),
+      kv({ ic: 'clock', c: 'orange', title: 'Booked hours', value: 'From 1 hour, in half hours' }),
+      kv({ ic: 'calPlus', title: 'Book ahead', value: `Up to ${c.advanceDays} days` }),
+      kv({ ic: 'people', title: 'Players per court', value: playersText() }),
     ];
 
     const pay = [];
@@ -1561,18 +1566,20 @@
     if (c.payment.payAtVenue) pay.push(cell({ ic: 'cash', c: 'green', title: 'Pay at the venue', sub: 'Front desk, before you play' }));
 
     const theme = prefs.get('appearance', 'system');
-    pg.content.append(
+    // The page sizes its columns from its own width (container queries), so it fits
+    // phones, tablets and desktops with or without the side bar.
+    pg.content.append(h('div', { class: 'info' },
       contact.length ? group({ title: 'Contact', items: contact }) : null,
-      h('div', { class: 'cols c-1-1' },
+      h('div', { class: 'info-cols' },
         h('div', { class: 'stack' },
-          group({ title: 'Hours and prices', items: hours, foot: 'A booking reserves a court for that day’s session. Amount due = number of players × booked hours × rate per hour.' }),
+          group({ title: 'Hours and prices', items: hours, foot: 'A booking is for one court for that day’s session, and other players can book the same court. Amount due = number of players × booked hours × rate per hour.' }),
           group({ title: 'Courts', items: c.courts.map((ct) => cell({ ic: 'court', title: ct.name })) })),
         h('div', { class: 'stack' },
           group({
             title: 'How booking works',
             items: [h('div', { class: 'steps' },
               ...[
-                ['Pick a date and a court', `Choose a day on the Book tab, then an available court. The court is yours for that day’s session (${hoursLines().join(', ')}).`],
+                ['Pick a date and a court', `Choose a day on the Book tab, then a court. Your booking covers that day’s session (${hoursLines().join(', ')}). Other players can book the same court too.`],
                 ['Add your details', `Enter your name, email and mobile number, how many are playing (${playersText()}) and how many hours you’re booking.`],
                 ['Pay', c.payment.bankTransfer ? 'Transfer the amount using your booking reference, or pay at the venue if offered.' : 'Pay at the front desk before you play.'],
                 ['Manage it', 'Find, add to calendar or cancel your booking under My Bookings.'],
@@ -1582,7 +1589,7 @@
             title: 'Policies',
             items: [
               cell({ ic: 'x', c: 'red', title: 'Cancellations', sub: cancelPolicyText() }),
-              cell({ ic: 'clock', c: 'orange', title: 'Unpaid bookings', sub: c.autoCancelHours ? `Bank transfer bookings not paid within ${c.autoCancelHours} hour${c.autoCancelHours > 1 ? 's' : ''} are released for others.` : 'Your court is held until the club confirms your payment.' }),
+              cell({ ic: 'clock', c: 'orange', title: 'Unpaid bookings', sub: c.autoCancelHours ? `Bank transfer bookings not paid within ${c.autoCancelHours} hour${c.autoCancelHours > 1 ? 's' : ''} are cancelled.` : 'Bank transfer bookings stay pending until the club confirms your payment.' }),
             ],
           }),
           pay.length ? group({ title: 'Payment options', items: pay }) : null,
@@ -1594,7 +1601,7 @@
             })
             : null)),
       group({ title: 'Appearance', items: [h('div', { class: 'seg-cell' }, seg([{ value: 'system', label: 'Automatic' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }], theme, applyTheme, 'Appearance'))] }),
-      group({ items: [cell({ ic: 'lock', c: 'gray', title: 'Staff sign in', sub: 'Manage bookings, reports and settings', href: '#/admin', chevron: true })] }));
+      group({ items: [cell({ ic: 'lock', c: 'gray', title: 'Staff sign in', sub: 'Manage bookings, reports and settings', href: '#/admin', chevron: true })] })));
   }
 
   // =====================================================================================
@@ -1788,7 +1795,7 @@
           A('restore', 'Restore Booking', 'undo', 'tint');
           A('delete', 'Delete Permanently', 'trash', 'red', { danger: true, confirm: { title: 'Delete this booking?', message: 'It will be removed from all reports. This can’t be undone.', confirm: 'Delete', destructive: true } });
         } else {
-          A('cancel', 'Cancel Booking', 'x', 'red', { danger: true, confirm: { title: 'Cancel this booking?', message: `${when} for ${b.name}. The court becomes available again.`, confirm: 'Cancel Booking', cancel: 'Keep', destructive: true } });
+          A('cancel', 'Cancel Booking', 'x', 'red', { danger: true, confirm: { title: 'Cancel this booking?', message: `${when} for ${b.name}.`, confirm: 'Cancel Booking', cancel: 'Keep', destructive: true } });
         }
       }
       actions.unshift(cell({ ic: 'pencil', c: 'gray', title: b.type === 'block' ? 'Edit Blocked Time' : 'Edit or Move Booking', onClick: () => { sh.close(); openStaffEditor({ existing: b, onSaved: onChanged }); } }));
@@ -2592,7 +2599,7 @@
       const rulesFoot = h('p', { class: 'group-foot' });
       const setRulesFoot = () => {
         rulesFoot.textContent = `Online bookings need ${D.minPlayers} to ${D.maxPlayers} players per court; walk-ins aren’t limited. ` +
-          'Release unpaid: bank transfer bookings with no payment after this many hours are cancelled automatically, freeing the court. Enter 0 to keep them until you cancel them.';
+          'Release unpaid: bank transfer bookings with no payment after this many hours are cancelled automatically. Enter 0 to keep them until you cancel them.';
       };
       setRulesFoot();
       const pick = (key, values, label) => {

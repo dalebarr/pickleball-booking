@@ -6,9 +6,10 @@ everything from a dashboard. It looks and feels like an iPhone app, and it works
 ## What it does
 
 **For players** (the public booking site)
-- Pick a **date**, then an available **court**. The court is reserved for that day's session, from the opening to the
+- Pick a **date**, then a **court**. The booking covers that day's session, from the opening to the
   closing time set in Settings (weekdays, Monday to Thursday, and weekends, Friday to Sunday, have their own hours);
-  there are no time slots to choose.
+  there are no time slots to choose. Bookings don't lock a court: other players can book the same court and date
+  (only courts blocked by the club and closed dates can't be booked).
 - In their details they enter **Booked hours**: from 1 hour up to the length of that day's session, in half hours.
   The price updates as they choose: **amount due = number of players × booked hours × rate per hour**.
 - Online bookings are for the number of players per court set in Settings (4 to 6 unless you change it).
@@ -26,8 +27,8 @@ everything from a dashboard. It looks and feels like an iPhone app, and it works
   (maintenance, clinics), and search every booking by name, email, phone or reference.
 - **Walk-in** (staff only): book customers who arrive at the desk by picking a date and a court, with the same details
   as online booking (including booked hours) and the PLUS reserve option. Walk-ins aren't limited by the online player rules. Staff can pick any date, past
-  or future (the players' booking window doesn't apply), including a court that is already booked: the walk-in shares
-  the court. Blocked courts and closed dates stay unavailable. Signed-in staff can also book any date from today onwards
+  or future (the players' booking window doesn't apply), including a court that is already booked (bookings share
+  courts). Blocked courts and closed dates stay unavailable. Signed-in staff can also book any date from today onwards
   on the Book a Court page. Staff can record "Paid now" with a receipt number. Walk-ins are labelled in lists and can be
   filtered in reports.
 - **Holidays and closures** (Settings): close or reopen the club on New Zealand public holidays (this year and next,
@@ -53,7 +54,8 @@ everything from a dashboard. It looks and feels like an iPhone app, and it works
   - Payment options (bank transfer and/or pay at venue) and payment instructions.
   - Change password, download a backup, sign out.
 
-Double bookings are impossible: the server checks every booking against the court's existing bookings and blocked time.
+Bookings never lock a court, so any number can be made for the same court and date. The server still checks every
+booking against blocked time and closed dates, and a court can only be blocked while it has no bookings.
 
 ## Run it on your computer
 
