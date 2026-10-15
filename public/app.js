@@ -735,6 +735,15 @@
   }
   const playersText = () => (CFG.minPlayers === CFG.maxPlayers ? `${CFG.maxPlayers} players` : `${CFG.minPlayers}–${CFG.maxPlayers} players`);
 
+  /** Bookings and players already on a court: { bookings, players } (blocked time not counted). */
+  function bookedOn(items) {
+    const booked = items.filter((b) => !isBlockItem(b));
+    return { bookings: booked.length, players: booked.reduce((n, b) => n + (b.players || 0), 0) };
+  }
+  /** "6 players booked · 2 bookings" */
+  const playersBookedText = (players, bookings) =>
+    `${players} player${players === 1 ? '' : 's'} booked · ${bookings} booking${bookings === 1 ? '' : 's'}`;
+
   /**
    * One row per court for a date, for players (online) and walk-ins.
    * Bookings don't lock a court: a court that is already booked stays bookable and
@@ -746,7 +755,7 @@
     const items = CFG.courts.map((c) => {
       const onCourt = busy.filter((b) => b.court === c.id);
       const blocked = onCourt.some(isBlockItem);
-      const booked = onCourt.filter((b) => !isBlockItem(b)).length;
+      const { bookings: booked, players } = bookedOn(onCourt);
       let status;
       let tag = null;
       let available = false;
@@ -755,21 +764,24 @@
       else if (over && !walkIn) { status = 'Today’s session has ended'; tag = 'Ended'; }
       else {
         available = true;
-        status = [
-          booked ? `Available · ${booked} booking${booked > 1 ? 's' : ''} already` : 'Available',
-          over ? 'this date has passed' : null,
-        ].filter(Boolean).join(' · ');
+        status = ['Available', over ? 'this date has passed' : null].filter(Boolean).join(' · ');
       }
       const action = walkIn ? 'Add Walk-in' : 'Book';
+      // Players already booked on this court for the date (the court is shared).
+      const bookedText = booked ? playersBookedText(players, booked) : '';
       return cell({
         ic: 'court', c: !available ? 'gray' : booked ? 'orange' : 'tint',
         title: c.name,
-        sub: `${status} · ${sessionRange(date)}`,
+        sub: booked
+          ? h('span', { style: { display: 'grid', gap: '6px', justifyItems: 'start' } },
+            h('span', { text: `${status} · ${sessionRange(date)}` }),
+            h('span', { class: 'chip', 'data-c': 'orange' }, icon('people'), bookedText))
+          : `${status} · ${sessionRange(date)}`,
         right: available
           ? h('span', { class: 'btn btn-sm btn-filled', 'aria-hidden': 'true' }, action)
           : h('span', { class: 'chip', 'data-c': 'gray' }, h('span', { class: 'dot' }), tag),
         onClick: available ? () => onPick(c.id) : null,
-        label: available ? `${c.name}: ${status}. ${action}` : null,
+        label: available ? `${c.name}: ${status}${booked ? `, ${bookedText}` : ''}. ${action}` : null,
       });
     });
     return group({ title: 'Courts', items });
@@ -1203,9 +1215,10 @@
     function refresh() {
       sessionNote.textContent = `${courtName(S.court)} is reserved for the ${isWeekend(date) ? 'weekend' : 'weekday'} session, ${sessionText(date)}. You pay for the booked hours.`;
       // The court may already have bookings: they share it.
-      const shared = onCourt(S.court).filter((b) => !isBlockItem(b)).length;
+      const { bookings: shared, players: sharedPlayers } = bookedOn(onCourt(S.court));
       const past = walkIn && !sessionOpen(date);
-      const sharedText = `${courtName(S.court)} already has ${shared} booking${shared > 1 ? 's' : ''} on this date. ` +
+      const sharedText = `${courtName(S.court)} already has ${sharedPlayers} player${sharedPlayers === 1 ? '' : 's'} booked on this date ` +
+        `(${shared} booking${shared > 1 ? 's' : ''}). ` +
         (walkIn ? 'The walk-in will share the court.' : 'You can still book it: the court is shared.');
       shareNote.replaceChildren(...[
         past ? banner('clock', `This date has passed. The walk-in will be recorded for ${fmt.dateLong(date)}.`) : null,

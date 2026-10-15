@@ -10,6 +10,8 @@ everything from a dashboard. It looks and feels like an iPhone app, and it works
   closing time set in Settings (weekdays, Monday to Thursday, and weekends, Friday to Sunday, have their own hours);
   there are no time slots to choose. Bookings don't lock a court: other players can book the same court and date
   (only courts blocked by the club and closed dates can't be booked).
+- A court that already has bookings shows how many players are booked on it for that date (for example
+  "6 players booked · 2 bookings"). Names are never shown.
 - In their details they enter **Booked hours**: from 1 hour up to the length of that day's session, in half hours.
   The price updates as they choose: **amount due = number of players × booked hours × rate per hour**.
 - Online bookings are for the number of players per court set in Settings (4 to 6 unless you change it).
