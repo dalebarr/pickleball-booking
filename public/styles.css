@@ -472,10 +472,12 @@ button.cell:focus-visible, a.cell:focus-visible { outline-offset: -3px; }
 .tiles { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 @media (min-width: 760px) { .tiles.t4 { grid-template-columns: repeat(4, minmax(0, 1fr)); } .tiles.t6 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (min-width: 1240px) { .tiles.t6 { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
-.tile { background: var(--surface); border-radius: var(--radius); padding: 14px 16px 15px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.tile { background: var(--surface); border-radius: var(--radius); padding: 14px 16px 15px; display: flex; flex-direction: column; gap: 3px; min-width: 0; container-type: inline-size; }
 .tile-label { font-size: 13px; font-weight: 600; color: var(--label-2); display: flex; align-items: center; gap: 6px; }
 .tile-label .ico { width: 16px; height: 16px; color: var(--tint); }
-.tile-value { font: 700 29px/1.15 var(--font-round); letter-spacing: -0.01em; overflow-wrap: anywhere; }
+/* Figures scale with the tile's width (up to 29px) and stay on one line, so amounts like
+   "$21,900.00" never break across lines on phones. */
+.tile-value { font: 700 clamp(17px, 18cqi, 29px)/1.15 var(--font-round); letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tile-sub { font-size: 13px; color: var(--label-2); }
 .tile.attn .tile-label .ico { color: var(--orange); }
 /* Dashboard: five tiles. Phones: two columns, the last tile full width. Medium: three
@@ -731,6 +733,19 @@ table.rtable { width: 100%; border-collapse: collapse; font-size: 14px; }
 .rtable td:last-child, .rtable th:last-child { padding-right: 16px; }
 .rtable tfoot td { font-weight: 700; border-top: 1px solid var(--sep-strong); border-bottom: 0; }
 .rtable.compact tbody tr { cursor: default; }
+
+/* Reports "By court": a table where there's room; on narrow screens each court becomes a
+   small card with labelled figures, so nothing scrolls sideways. */
+.court-wrap { container: courts / inline-size; }
+@container courts (max-width: 480px) {
+  .rtable.court-table thead { display: none; }
+  .rtable.court-table, .rtable.court-table tbody { display: block; }
+  .rtable.court-table tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px 16px; padding: 12px 16px; border-bottom: 1px solid var(--sep); }
+  .rtable.court-table tbody tr:last-child { border-bottom: 0; }
+  .rtable.court-table td { display: block; padding: 0; border: 0; text-align: left; }
+  .rtable.court-table td:first-child { grid-column: 1 / -1; font-weight: 600; }
+  .rtable.court-table td[data-label]::before { content: attr(data-label); display: block; font-size: 12px; font-weight: 400; color: var(--label-2); margin-bottom: 1px; }
+}
 
 /* SJV Hall payments: on narrow screens "Paid by" moves under the date and the buttons stack. */
 .hall-form { gap: 12px; }

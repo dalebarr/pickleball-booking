@@ -163,21 +163,9 @@
     },
     hour: (hr) => df({ hour: 'numeric' }).format(new Date(Date.UTC(2000, 0, 1, hr))),
     range: (a, b) => `${fmt.time(a)} – ${fmt.time(b)}`,
-    // Money shows just the currency sign: "$90.00", not "NZ$90.00".
-    money: (n, cur) => {
-      try {
-        return currencyFormat(cur).format(n || 0);
-      } catch {
-        return `${cur || CFG.currency} ${(n || 0).toFixed(2)}`;
-      }
-    },
-    moneyAxis: (n, cur) => {
-      try {
-        return currencyFormat(cur, { notation: 'compact', maximumFractionDigits: 1 }).format(n || 0);
-      } catch {
-        return String(n);
-      }
-    },
+    // Money shows just the currency sign: "$90.00", never "NZ$90.00" (see formatMoney).
+    money: (n, cur) => formatMoney(n, cur),
+    moneyAxis: (n, cur) => formatMoney(n, cur, { notation: 'compact', maximumFractionDigits: 1 }),
     dur: (m) => {
       if (m < 60) return `${m} min`;
       const hrs = m / 60;
@@ -203,12 +191,29 @@
     }
   }
 
+  // Dollar currencies always show a plain "$": never "NZ$", "US$", "A$" or "NZD",
+  // whatever the browser's language or age.
+  const DOLLARS = new Set(['NZD', 'USD', 'AUD', 'CAD', 'SGD', 'HKD']);
+  const signFor = (code, sign) => (DOLLARS.has(code) ? '$' : sign.replace(/^[A-Za-z]+(?=\$)/, ''));
+
+  /** "$1,234.50": the amount with just the currency sign. `extra` adds Intl options (e.g. compact). */
+  function formatMoney(n, cur, extra) {
+    const code = cur || CFG.currency;
+    try {
+      return currencyFormat(code, extra).formatToParts(n || 0)
+        .map((part) => (part.type === 'currency' ? signFor(code, part.value) : part.value)).join('');
+    } catch {
+      return `${DOLLARS.has(code) ? '$' : code + ' '}${(n || 0).toFixed(2)}`;
+    }
+  }
+
   /** The currency sign alone, for field labels: "$". */
   function currencySign(cur) {
+    const code = cur || CFG.currency;
     try {
-      return currencyFormat(cur).formatToParts(0).find((p) => p.type === 'currency').value;
+      return signFor(code, currencyFormat(code).formatToParts(0).find((part) => part.type === 'currency').value);
     } catch {
-      return cur || CFG.currency;
+      return DOLLARS.has(code) ? '$' : code;
     }
   }
 
@@ -2606,12 +2611,13 @@
         chartBox);
 
       const totalHours = r.byCourt.reduce((n, g) => n + g.hours, 0);
-      const courtTable = h('div', { class: 'rtable-wrap' }, h('table', { class: 'rtable compact' },
+      const courtTable = h('div', { class: 'rtable-wrap court-wrap' }, h('table', { class: 'rtable compact court-table' },
         h('thead', null, h('tr', null, h('th', { text: 'Court' }), h('th', { class: 'r', text: 'Bookings' }), h('th', { class: 'r', text: 'Booked hrs' }), h('th', { class: 'r', text: 'Value' }), h('th', { class: 'r', text: 'Collected' }))),
         h('tbody', null, r.byCourt.map((g) => h('tr', null,
           h('td', null, h('div', { text: g.name }), h('div', { class: 'meter', style: { maxWidth: '160px', marginTop: '6px' } }, h('span', { style: { width: totalHours ? `${(g.hours / totalHours) * 100}%` : '0' } }))),
-          h('td', { class: 'r', text: fmt.num(g.active) }), h('td', { class: 'r', text: fmt.hours(g.hours) }),
-          h('td', { class: 'r', text: fmt.money(g.billed, cur) }), h('td', { class: 'r', text: fmt.money(g.collected, cur) }))))));
+          // data-label names each figure when the table turns into cards on narrow screens.
+          h('td', { class: 'r', 'data-label': 'Bookings', text: fmt.num(g.active) }), h('td', { class: 'r', 'data-label': 'Booked hrs', text: fmt.hours(g.hours) }),
+          h('td', { class: 'r', 'data-label': 'Value', text: fmt.money(g.billed, cur) }), h('td', { class: 'r', 'data-label': 'Collected', text: fmt.money(g.collected, cur) }))))));
 
       const byMethod = r.byMethod.map((g) => ({ ...g, label: METHOD[g.key] }));
       const dayItems = [1, 2, 3, 4, 5, 6, 0].map((d) => ({ k: fmt.dowLong(d), v: r.byWeekday.find((x) => x.day === d).bookings }));
