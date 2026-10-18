@@ -31,6 +31,7 @@
   --tint-hover: #087347;
   --on-tint: #FFFFFF;
   --tint-soft: rgba(10, 135, 84, 0.11);
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230A8754' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 9.5l4-4 4 4M8 14.5l4 4 4-4'/%3E%3C/svg%3E");
   --tint-soft-2: rgba(10, 135, 84, 0.2);
   --chart-muted: rgba(10, 135, 84, 0.36);
   --ball: #D4E42A;
@@ -83,6 +84,7 @@
     --tint-hover: #52DC9C;
     --on-tint: #00210F;
     --tint-soft: rgba(48, 209, 134, 0.14);
+    --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2330D186' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 9.5l4-4 4 4M8 14.5l4 4 4-4'/%3E%3C/svg%3E");
     --tint-soft-2: rgba(48, 209, 134, 0.24);
     --chart-muted: rgba(48, 209, 134, 0.38);
     --blue: #0A84FF;
@@ -125,6 +127,7 @@
   --tint-hover: #52DC9C;
   --on-tint: #00210F;
   --tint-soft: rgba(48, 209, 134, 0.14);
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2330D186' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 9.5l4-4 4 4M8 14.5l4 4 4-4'/%3E%3C/svg%3E");
   --tint-soft-2: rgba(48, 209, 134, 0.24);
   --chart-muted: rgba(48, 209, 134, 0.38);
   --blue: #0A84FF;
@@ -349,12 +352,21 @@ button.cell:focus-visible, a.cell:focus-visible { outline-offset: -3px; }
 .field.stack { flex-direction: column; align-items: stretch; gap: 0; padding-top: 10px; }
 .field.stack > label { width: auto; max-width: none; font-size: 13px; color: var(--label-2); }
 .field textarea { resize: vertical; min-height: 84px; padding-top: 6px; line-height: 1.4; }
+/* Dropdowns: a rounded, bordered button in the theme's colours. The chosen value is in the
+   main text colour with a tinted up/down chevron, and the option list follows light/dark. */
 .field select {
-  -webkit-appearance: none; appearance: none; cursor: pointer; text-align: right; text-align-last: right;
-  padding-right: 22px; color: var(--label-2);
-  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238E8E93' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 9l4-4 4 4M8 15l4 4 4-4'/%3E%3C/svg%3E") right center / 16px no-repeat;
+  -webkit-appearance: none; appearance: none; cursor: pointer;
+  min-height: 36px; margin: 5px 0; padding: 7px 34px 7px 12px;
+  border: 1px solid var(--sep-strong); border-radius: 10px;
+  background: var(--select-chevron) right 10px center / 16px no-repeat, var(--fill);
+  color: var(--label); text-align: left; text-overflow: ellipsis; white-space: nowrap; overflow: hidden;
+  transition: background-color 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
-.field select option { color: initial; }
+.field select:hover { background-color: var(--fill-2); }
+.field select:focus-visible { border-color: var(--tint); box-shadow: 0 0 0 3px var(--tint-soft); }
+.field:focus-within:has(> select) { box-shadow: none; }
+.field select option { background-color: var(--elevated); color: var(--label); }
+.field select option:disabled { color: var(--label-3); }
 .field input[type="date"], .field input[type="time"] { text-align: right; color: var(--label-2); min-height: 44px; }
 .field input.right { text-align: right; }
 .field .unit { color: var(--label-2); }
