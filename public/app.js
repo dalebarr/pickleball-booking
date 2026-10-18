@@ -91,6 +91,7 @@
     appearance: '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor"/>',
     external: '<path d="M14 4h6v6M20 4l-9 9M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/>',
     star: '<path d="M12 3.6l2.6 5.3 5.8.85-4.2 4.1 1 5.8L12 16.9l-5.2 2.75 1-5.8-4.2-4.1 5.8-.85z"/>',
+    hall: '<path d="M3.5 10L12 4.5l8.5 5.5M5.5 10v9.5h13V10M3.5 19.5h17M10 19.5v-5h4v5"/>',
     walkin: '<circle cx="9.5" cy="7.5" r="3.2"/><path d="M3.5 19.5a6 6 0 0 1 12 0M18.5 8.5v6M15.5 11.5h6"/>',
   };
   function icon(name, cls) {
@@ -146,6 +147,9 @@
     dateShort: (d) => df({ month: 'short', day: 'numeric' }).format(parseDate(d)),
     dateMed: (d) => df({ month: 'short', day: 'numeric', year: 'numeric' }).format(parseDate(d)),
     dateLong: (d) => df({ weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }).format(parseDate(d)),
+    dateYear: (d) => df({ day: 'numeric', month: 'short', year: 'numeric' }).format(parseDate(d)),
+    /** "$1,234.50": dollars with the "$" sign only, for SJV Hall payments. */
+    dollars: (n) => '$' + Number(n || 0).toLocaleString('en-NZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
     dayTitle: (d) => df({ weekday: 'long', month: 'long', day: 'numeric' }).format(parseDate(d)),
     dow: (d) => df({ weekday: 'short' }).format(parseDate(d)),
     dowLong: (n) => df({ weekday: 'long' }).format(new Date(Date.UTC(2023, 0, 1 + n))),
@@ -2059,13 +2063,17 @@
       }
 
       const monthName = fmt.month(d.month.key);
-      const tiles = h('div', { class: 'tiles t4' },
+      const hall = d.hall;
+      const tiles = h('div', { class: 'tiles t5' },
         tile('calendar', 'Bookings today', fmt.num(d.today.bookings),
           `${fmt.num(d.today.players)} players · ${fmt.hours(d.today.hours)} booked hrs · ${fmt.money(d.today.revenue)}${d.today.walkIns ? ` · ${d.today.walkIns} walk-in${d.today.walkIns === 1 ? '' : 's'}` : ''}`),
         tile('court', 'Court use today', fmt.pct(d.today.utilization), `Across ${CFG.courts.length} court${CFG.courts.length > 1 ? 's' : ''}`, h('div', { class: 'meter', role: 'presentation' }, h('span', { style: { width: fmt.pct(d.today.utilization) } }))),
         tile('cash', `Collected in ${fmt.monthShort(d.month.key)}`, fmt.money(d.month.collected), `${fmt.money(d.month.billed)} booked in ${monthName}`),
-        tile('alert', 'Payments to check', fmt.num(d.payments.toVerify), `${fmt.num(d.payments.unpaidUpcoming)} upcoming unpaid · ${fmt.money(d.payments.unpaidAmount)}`, null, d.payments.toVerify > 0));
-      nodes.push(tiles);
+        tile('alert', 'Payments to check', fmt.num(d.payments.toVerify), `${fmt.num(d.payments.unpaidUpcoming)} upcoming unpaid · ${fmt.money(d.payments.unpaidAmount)}`, null, d.payments.toVerify > 0),
+        tile('hall', 'SJV Hall payments', fmt.dollars(hall.total),
+          `${fmt.dollars(hall.month)} in ${fmt.monthShort(hall.monthKey)} · ${fmt.num(hall.count)} payment${hall.count === 1 ? '' : 's'}`));
+      // The tiles sit in a container so their columns follow the space they have.
+      nodes.push(h('div', { class: 'tiles-box' }, tiles));
 
       const chartBox = h('div');
       const drawChart = () => chartBox.replaceChildren(barChart({
@@ -2114,6 +2122,139 @@
 
     await reload();
     live.handler = () => reload(); // refresh when anyone books, pays or cancels
+  }
+
+  // =====================================================================================
+  // Staff: SJV Hall payments
+  // =====================================================================================
+
+  /**
+   * SJV Hall payments: a form (date, amount paid, paid by) with Cancel and Save,
+   * and below it a table of every payment with Edit and Delete.
+   */
+  function openHallPayments() {
+    const sh = openSheet({ title: 'SJV Hall Payment' });
+    sh.setLeft(plainBtn('Close', () => sh.close()));
+    let payments = [];
+    let editing = null; // the payment being edited; null when adding a new one
+
+    const errBox = h('div');
+    const dateIn = h('input', { type: 'date', 'aria-label': 'Payment date' });
+    const amountIn = h('input', { type: 'number', inputmode: 'decimal', min: '0.01', step: '0.01', placeholder: '0.00', class: 'right' });
+    const paidByIn = h('input', { maxlength: 80, placeholder: 'Name', autocomplete: 'off' });
+    const formBox = h('div');
+    const saveBtn = h('button', { type: 'submit', class: 'btn btn-filled', text: 'Save' });
+    const cancelBtn = h('button', { type: 'button', class: 'btn btn-gray', text: 'Cancel', onclick: cancel });
+    const listBox = h('div', null, loading());
+    const form = h('form', { novalidate: true, class: 'stack hall-form', onsubmit: save },
+      errBox, formBox, h('div', { class: 'btn-row' }, cancelBtn, saveBtn));
+    sh.setBody(form, listBox);
+
+    // Backdrop taps don't close the window while the form has unsaved input.
+    const dirty = () => (editing
+      ? dateIn.value !== editing.date || Number(amountIn.value) !== editing.amount || paidByIn.value.trim() !== editing.paidBy
+      : Boolean(amountIn.value || paidByIn.value.trim()));
+    form.addEventListener('input', () => { sh.guard = dirty(); });
+
+    function drawForm() {
+      formBox.replaceChildren(group({
+        title: editing ? 'Edit payment' : 'New payment',
+        items: [field('Date', dateIn), field('Amount paid ($)', amountIn), field('Paid by', paidByIn)],
+      }));
+      sh.guard = dirty();
+    }
+
+    function fill(p) {
+      editing = p;
+      dateIn.value = p ? p.date : clubNow().date;
+      amountIn.value = p ? String(p.amount) : '';
+      paidByIn.value = p ? p.paidBy : '';
+      errBox.replaceChildren();
+      drawForm();
+      drawList();
+    }
+
+    function cancel() {
+      // Cancel an edit and go back to adding; otherwise close the window.
+      if (editing) fill(null);
+      else sh.close();
+    }
+
+    async function save(e) {
+      e.preventDefault();
+      const amount = Number(amountIn.value);
+      const problem = !dateIn.value ? [dateIn, 'Choose the payment date.']
+        : !(amount > 0) ? [amountIn, 'Enter the amount paid.']
+          : !paidByIn.value.trim() ? [paidByIn, 'Enter who paid.'] : null;
+      if (problem) {
+        errBox.replaceChildren(banner('alert', problem[1], 'error'));
+        problem[0].focus();
+        return;
+      }
+      const body = { date: dateIn.value, amount, paidBy: paidByIn.value.trim() };
+      saveBtn.disabled = true;
+      try {
+        const r = editing
+          ? await api(`/api/admin/hall-payments/${editing.id}`, { method: 'PATCH', body })
+          : await api('/api/admin/hall-payments', { method: 'POST', body });
+        toast(editing ? 'Payment updated' : 'Payment saved');
+        payments = r.payments;
+        fill(null);
+      } catch (err) {
+        if (err.status === 401) return handleError(err);
+        errBox.replaceChildren(banner('alert', err.message, 'error'));
+      } finally {
+        saveBtn.disabled = false;
+      }
+    }
+
+    async function remove(p) {
+      const ok = await confirmDialog({
+        title: 'Delete this payment?',
+        message: `${fmt.dollars(p.amount)} paid by ${p.paidBy} on ${fmt.dateLong(p.date)}.`,
+        confirm: 'Delete', destructive: true,
+      });
+      if (!ok) return;
+      try {
+        const r = await api(`/api/admin/hall-payments/${p.id}`, { method: 'DELETE' });
+        payments = r.payments;
+        toast('Payment deleted');
+        if (editing && editing.id === p.id) fill(null);
+        else drawList();
+      } catch (err) { handleError(err); }
+    }
+
+    function drawList() {
+      if (!payments.length) {
+        listBox.replaceChildren(group({ title: 'Payments', items: [cell({ ic: 'hall', c: 'gray', title: 'No payments yet', sub: 'Saved payments are listed here.' })] }));
+        return;
+      }
+      const total = payments.reduce((n, p) => n + p.amount, 0);
+      const when = (p) => `${fmt.dollars(p.amount)} on ${fmt.dateYear(p.date)}`;
+      listBox.replaceChildren(h('section', { class: 'group' },
+        h('h2', { class: 'group-title' }, h('span', { text: `Payments (${payments.length})` })),
+        h('div', { class: 'rtable-wrap hall-wrap' }, h('table', { class: 'rtable compact hall-table' },
+          h('thead', null, h('tr', null,
+            h('th', { text: 'Date' }), h('th', { class: 'hall-by', text: 'Paid by' }), h('th', { class: 'r', text: 'Amount' }),
+            h('th', null, h('span', { class: 'sr-only', text: 'Actions' })))),
+          h('tbody', null, payments.map((p) => h('tr', { class: editing && editing.id === p.id ? 'editing' : null },
+            h('td', null, h('div', { class: 'nowrap', text: fmt.dateYear(p.date) }), h('div', { class: 'hall-by-sub', text: p.paidBy })),
+            h('td', { class: 'hall-by', text: p.paidBy }),
+            h('td', { class: 'r nowrap', text: fmt.dollars(p.amount) }),
+            h('td', { class: 'hall-actions' }, h('div', { class: 'hall-btns' },
+              h('button', { type: 'button', class: 'btn btn-sm btn-gray', text: 'Edit', 'aria-label': `Edit ${when(p)}`, onclick: () => { fill(p); sh.body.scrollTop = 0; dateIn.focus(); } }),
+              h('button', { type: 'button', class: 'btn btn-sm btn-gray del', text: 'Delete', 'aria-label': `Delete ${when(p)}`, onclick: () => remove(p) })))))),
+          h('tfoot', null, h('tr', null,
+            h('td', { text: 'Total' }), h('td', { class: 'hall-by' }), h('td', { class: 'r nowrap', text: fmt.dollars(total) }), h('td')))))));
+    }
+
+    fill(null);
+    api('/api/admin/hall-payments')
+      .then((r) => { payments = r.payments; drawList(); })
+      .catch((err) => {
+        if (err.status === 401) return handleError(err);
+        listBox.replaceChildren(banner('alert', err.message, 'error'));
+      });
   }
 
   function tile(ic, label, value, sub, extra, attn) {
@@ -2850,6 +2991,7 @@
         group({
           title: 'Staff account',
           items: [
+            cell({ ic: 'hall', c: 'orange', title: 'SJV Hall Payment', sub: 'Record, edit or delete payments for the hall', chevron: true, onClick: () => openHallPayments() }),
             cell({ ic: 'key', c: 'gray', title: 'Change Password', chevron: true, onClick: openPasswordSheet }),
             cell({ ic: 'download', c: 'blue', title: 'Download Backup', sub: 'All settings and bookings as a JSON file', href: '/api/admin/backup', download: '' }),
             cell({ ic: 'globe', c: 'tint', title: 'Open Booking Site', href: '#/book', chevron: true }),

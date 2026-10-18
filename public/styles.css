@@ -478,6 +478,19 @@ button.cell:focus-visible, a.cell:focus-visible { outline-offset: -3px; }
 .tile-value { font: 700 29px/1.15 var(--font-round); letter-spacing: -0.01em; overflow-wrap: anywhere; }
 .tile-sub { font-size: 13px; color: var(--label-2); }
 .tile.attn .tile-label .ico { color: var(--orange); }
+/* Dashboard: five tiles. Phones: two columns, the last tile full width. Medium: three
+   tiles, then two wider ones. Wide: one row of five. Sized from the space the tiles have. */
+.tiles-box { container: tiles / inline-size; }
+.tiles.t5 > :last-child { grid-column: 1 / -1; }
+@container tiles (min-width: 560px) {
+  .tiles.t5 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .tiles.t5 > * { grid-column: span 2; }
+  .tiles.t5 > :nth-child(n+4) { grid-column: span 3; }
+}
+@container tiles (min-width: 1040px) {
+  .tiles.t5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .tiles.t5 > *, .tiles.t5 > :nth-child(n+4) { grid-column: auto; }
+}
 .meter { height: 6px; border-radius: 3px; background: var(--tint-soft-2); overflow: hidden; margin-top: 8px; }
 .meter > span { display: block; height: 100%; background: var(--tint); border-radius: 3px; }
 
@@ -718,6 +731,23 @@ table.rtable { width: 100%; border-collapse: collapse; font-size: 14px; }
 .rtable td:last-child, .rtable th:last-child { padding-right: 16px; }
 .rtable tfoot td { font-weight: 700; border-top: 1px solid var(--sep-strong); border-bottom: 0; }
 .rtable.compact tbody tr { cursor: default; }
+
+/* SJV Hall payments: on narrow screens "Paid by" moves under the date and the buttons stack. */
+.hall-form { gap: 12px; }
+.hall-wrap { container: hall / inline-size; }
+.hall-table td { vertical-align: middle; }
+.hall-table .hall-by { overflow-wrap: anywhere; }
+.hall-table .hall-by-sub { display: none; font-size: 13px; color: var(--label-2); margin-top: 2px; overflow-wrap: anywhere; }
+.hall-table .hall-actions { width: 1%; }
+.hall-btns { display: flex; gap: 6px; justify-content: flex-end; }
+.hall-btns .btn { padding: 0 12px; }
+.hall-btns .btn.del { color: var(--red-text); }
+.hall-table tbody tr.editing td { background: var(--tint-soft); }
+@container hall (max-width: 460px) {
+  .hall-table .hall-by { display: none; }
+  .hall-table .hall-by-sub { display: block; }
+  .hall-btns { flex-direction: column; align-items: stretch; }
+}
 .rtable.compact tbody tr:hover { background: none; }
 .rows-mobile { display: block; }
 .rows-desktop { display: none; }

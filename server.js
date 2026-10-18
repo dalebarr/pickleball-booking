@@ -10,6 +10,7 @@ const { URL } = require('url');
 const U = require('./lib/util');
 const B = require('./lib/bookings');
 const R = require('./lib/reports');
+const Hall = require('./lib/hall');
 const { createBackend } = require('./lib/store');
 const { nzPublicHolidays } = require('./lib/holidays');
 
@@ -405,6 +406,33 @@ route('DELETE', '/api/admin/bookings/:id', ({ req, params }) => {
   backend.deleteBooking(state, b.id);
   broadcast({ kind: 'booking', action: 'deleted', by: clientId(req), id: b.id, ref: b.ref, type: b.type });
   return { ok: true };
+}, { admin: true });
+
+// SJV Hall payments (staff only). Each change returns the full list so the screen can redraw.
+const hallResponse = (payment) => ({ payment, payments: Hall.list(state), summary: Hall.summary(state) });
+function hallChanged(req, action, p) {
+  saveMeta();
+  broadcast({ kind: 'hall', action, by: clientId(req), id: p.id });
+}
+
+route('GET', '/api/admin/hall-payments', () => hallResponse(null), { admin: true });
+
+route('POST', '/api/admin/hall-payments', ({ req, body }) => {
+  const p = Hall.create(state, body);
+  hallChanged(req, 'created', p);
+  return hallResponse(p);
+}, { admin: true });
+
+route('PATCH', '/api/admin/hall-payments/:id', ({ req, params, body }) => {
+  const p = Hall.update(state, params.id, body);
+  hallChanged(req, 'updated', p);
+  return hallResponse(p);
+}, { admin: true });
+
+route('DELETE', '/api/admin/hall-payments/:id', ({ req, params }) => {
+  const p = Hall.remove(state, params.id);
+  hallChanged(req, 'deleted', p);
+  return hallResponse(null);
 }, { admin: true });
 
 route('GET', '/api/admin/reports', ({ query }) => {

@@ -23,8 +23,8 @@ everything from a dashboard. It looks and feels like an iPhone app, and it works
 - Can be added to the iPhone or Android home screen like an app.
 
 **For staff** (`/#/admin`, password protected)
-- **Dashboard**: today's bookings, court use, money collected this month, payments to check, a 14-day revenue/bookings
-  chart, a live "courts today" timeline, payments to verify, and upcoming bookings.
+- **Dashboard**: today's bookings, court use, money collected this month, payments to check, SJV Hall payments
+  (total paid in dollars and this month's amount), a 14-day revenue/bookings chart, a live "courts today" timeline, payments to verify, and upcoming bookings.
 - **Schedule**: day by day, one card per court with its bookings. Add phone bookings or block a court for the day
   (maintenance, clinics), and search every booking by name, email, phone or reference.
 - **Walk-in** (staff only): book customers who arrive at the desk by picking a date and a court, with the same details
@@ -54,6 +54,8 @@ everything from a dashboard. It looks and feels like an iPhone app, and it works
     people can book, cancellation cutoff, automatic release of unpaid bookings.
   - Rate per player per hour, PLUS reserve rate (staff only), currency, time zone.
   - Payment options (bank transfer and/or pay at venue) and payment instructions.
+  - **SJV Hall Payment** (Staff account): record what the club pays for the hall (date, amount paid, paid by).
+    Every payment is listed in a table below the form, with Edit and Delete, and the total.
   - Change password, download a backup, sign out.
 
 Bookings never lock a court, so any number can be made for the same court and date. The server still checks every
@@ -140,6 +142,7 @@ copy `data/db.json` while the app is stopped.
 server.js            HTTP server, API routes, static files
 lib/bookings.js      Booking rules: settings, pricing, availability, double-booking checks, actions
 lib/reports.js       Dashboard figures, filtered reports, CSV export
+lib/hall.js          SJV Hall payments
 lib/store.js         Storage: JSON file or PostgreSQL
 lib/util.js          Dates, validation, passwords
 public/              The app (index.html, app.js, styles.css, icons)
