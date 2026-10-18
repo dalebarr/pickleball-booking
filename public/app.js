@@ -170,6 +170,14 @@
         return `${cur || CFG.currency} ${(n || 0).toFixed(2)}`;
       }
     },
+    /** Money with just the currency sign, e.g. "$90.00" for NZD instead of "NZ$90.00". */
+    moneySign: (n, cur) => {
+      try {
+        return new Intl.NumberFormat(undefined, { style: 'currency', currency: cur || CFG.currency, currencyDisplay: 'narrowSymbol' }).format(n || 0);
+      } catch {
+        return fmt.money(n, cur);
+      }
+    },
     moneyAxis: (n, cur) => {
       try {
         return new Intl.NumberFormat(undefined, {
@@ -2068,7 +2076,7 @@
         tile('calendar', 'Bookings today', fmt.num(d.today.bookings),
           `${fmt.num(d.today.players)} players · ${fmt.hours(d.today.hours)} booked hrs · ${fmt.money(d.today.revenue)}${d.today.walkIns ? ` · ${d.today.walkIns} walk-in${d.today.walkIns === 1 ? '' : 's'}` : ''}`),
         tile('court', 'Court use today', fmt.pct(d.today.utilization), `Across ${CFG.courts.length} court${CFG.courts.length > 1 ? 's' : ''}`, h('div', { class: 'meter', role: 'presentation' }, h('span', { style: { width: fmt.pct(d.today.utilization) } }))),
-        tile('cash', `Collected in ${fmt.monthShort(d.month.key)}`, fmt.money(d.month.collected), `${fmt.money(d.month.billed)} booked in ${monthName}`),
+        tile('cash', `Collected in ${fmt.monthShort(d.month.key)}`, fmt.moneySign(d.month.collected), `${fmt.moneySign(d.month.billed)} booked in ${monthName}`),
         tile('alert', 'Payments to check', fmt.num(d.payments.toVerify), `${fmt.num(d.payments.unpaidUpcoming)} upcoming unpaid · ${fmt.money(d.payments.unpaidAmount)}`, null, d.payments.toVerify > 0),
         tile('hall', 'SJV Hall payments', fmt.dollars(hall.total),
           `${fmt.dollars(hall.month)} in ${fmt.monthShort(hall.monthKey)} · ${fmt.num(hall.count)} payment${hall.count === 1 ? '' : 's'}`));
