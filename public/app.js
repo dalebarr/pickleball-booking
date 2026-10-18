@@ -163,26 +163,17 @@
     },
     hour: (hr) => df({ hour: 'numeric' }).format(new Date(Date.UTC(2000, 0, 1, hr))),
     range: (a, b) => `${fmt.time(a)} – ${fmt.time(b)}`,
+    // Money shows just the currency sign: "$90.00", not "NZ$90.00".
     money: (n, cur) => {
       try {
-        return new Intl.NumberFormat(undefined, { style: 'currency', currency: cur || CFG.currency }).format(n || 0);
+        return currencyFormat(cur).format(n || 0);
       } catch {
         return `${cur || CFG.currency} ${(n || 0).toFixed(2)}`;
       }
     },
-    /** Money with just the currency sign, e.g. "$90.00" for NZD instead of "NZ$90.00". */
-    moneySign: (n, cur) => {
-      try {
-        return new Intl.NumberFormat(undefined, { style: 'currency', currency: cur || CFG.currency, currencyDisplay: 'narrowSymbol' }).format(n || 0);
-      } catch {
-        return fmt.money(n, cur);
-      }
-    },
     moneyAxis: (n, cur) => {
       try {
-        return new Intl.NumberFormat(undefined, {
-          style: 'currency', currency: cur || CFG.currency, notation: 'compact', maximumFractionDigits: 1,
-        }).format(n || 0);
+        return currencyFormat(cur, { notation: 'compact', maximumFractionDigits: 1 }).format(n || 0);
       } catch {
         return String(n);
       }
@@ -198,6 +189,35 @@
     stamp: (isoStr) =>
       isoStr ? new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(isoStr)) : '',
   };
+
+  /**
+   * Currency formatter that shows only the sign ("$" for NZD, not "NZ$").
+   * Browsers without the short sign fall back to the standard one.
+   */
+  function currencyFormat(cur, extra = {}) {
+    const opts = { style: 'currency', currency: cur || CFG.currency, ...extra };
+    try {
+      return new Intl.NumberFormat(undefined, { ...opts, currencyDisplay: 'narrowSymbol' });
+    } catch {
+      return new Intl.NumberFormat(undefined, opts);
+    }
+  }
+
+  /** The currency sign alone, for field labels: "$". */
+  function currencySign(cur) {
+    try {
+      return currencyFormat(cur).formatToParts(0).find((p) => p.type === 'currency').value;
+    } catch {
+      return cur || CFG.currency;
+    }
+  }
+
+  /** Currency picker options by name, e.g. "New Zealand Dollar ($)", instead of codes. */
+  function currencyOptions(codes) {
+    let names = null;
+    try { names = new Intl.DisplayNames(undefined, { type: 'currency' }); } catch { /* older browsers: codes */ }
+    return codes.map((c) => ({ value: c, label: names ? `${names.of(c)} (${currencySign(c)})` : c }));
+  }
 
   function dayLabel(d) {
     const diff = daysBetween(CFG.now.date, d);
@@ -1683,7 +1703,7 @@
     };
     const nameIn = h('input', { placeholder: 'e.g. Riverside Pickleball', maxlength: 80, autocomplete: 'organization' });
     const tzIn = timeZoneSelect(S.timezone);
-    const curIn = select(CURRENCIES.map((c) => ({ value: c, label: c })), S.currency);
+    const curIn = select(currencyOptions(CURRENCIES), S.currency);
     const courts = stepper({ value: S.courtCount, min: 1, max: 3, label: 'Courts', onChange: (v) => { S.courtCount = v; } });
     const wdOpenIn = select(timeOptions(0, 23 * 60 + 30), '07:00');
     const wdCloseIn = select(timeOptions(60, 1440), '22:00');
@@ -1972,7 +1992,7 @@
         nodes.push(group({
           title: 'Payment',
           items: [
-            field(`Amount (${CFG.currency})`, amountIn),
+            field(`Amount (${currencySign()})`, amountIn),
             h('div', { class: 'seg-cell' }, seg([{ value: 'venue', label: 'Pay at venue' }, { value: 'bank', label: 'Bank transfer' }], S.paymentMethod, (v) => { S.paymentMethod = v; }, 'Payment method')),
             field('Payment', select(Object.entries(PAY).map(([k, v]) => ({ value: k, label: v.label })), S.paymentStatus, { onchange: (ev) => { S.paymentStatus = ev.target.value; } })),
             field('Transfer ref.', ref),
@@ -2076,7 +2096,7 @@
         tile('calendar', 'Bookings today', fmt.num(d.today.bookings),
           `${fmt.num(d.today.players)} players · ${fmt.hours(d.today.hours)} booked hrs · ${fmt.money(d.today.revenue)}${d.today.walkIns ? ` · ${d.today.walkIns} walk-in${d.today.walkIns === 1 ? '' : 's'}` : ''}`),
         tile('court', 'Court use today', fmt.pct(d.today.utilization), `Across ${CFG.courts.length} court${CFG.courts.length > 1 ? 's' : ''}`, h('div', { class: 'meter', role: 'presentation' }, h('span', { style: { width: fmt.pct(d.today.utilization) } }))),
-        tile('cash', `Collected in ${fmt.monthShort(d.month.key)}`, fmt.moneySign(d.month.collected), `${fmt.moneySign(d.month.billed)} booked in ${monthName}`),
+        tile('cash', `Collected in ${fmt.monthShort(d.month.key)}`, fmt.money(d.month.collected), `${fmt.money(d.month.billed)} booked in ${monthName}`),
         tile('alert', 'Payments to check', fmt.num(d.payments.toVerify), `${fmt.num(d.payments.unpaidUpcoming)} upcoming unpaid · ${fmt.money(d.payments.unpaidAmount)}`, null, d.payments.toVerify > 0),
         tile('hall', 'SJV Hall payments', fmt.dollars(hall.total),
           `${fmt.dollars(hall.month)} in ${fmt.monthShort(hall.monthKey)} · ${fmt.num(hall.count)} payment${hall.count === 1 ? '' : 's'}`));
@@ -2796,14 +2816,14 @@
 
     function pricingSection() {
       const items = [
-        field('Currency', select(res.currencies.map((c) => ({ value: c, label: c })), D.currency, { id: 'set-currency', onchange: (ev) => { D.currency = ev.target.value; changed(); slots.pricing(); } })),
-        field(`Rate per player / hr (${D.currency})`, number('pricePerHour', { decimal: true })),
+        field('Currency', select(currencyOptions(res.currencies), D.currency, { id: 'set-currency', onchange: (ev) => { D.currency = ev.target.value; changed(); slots.pricing(); } })),
+        field(`Rate per player / hr (${currencySign(D.currency)})`, number('pricePerHour', { decimal: true })),
       ];
       return h('div', { class: 'stack' },
         group({ title: 'Pricing', items, foot: 'Amount due = number of players × booked hours × rate per hour. Changes apply to new bookings only.' }),
         group({
           title: 'PLUS reserve (staff only)',
-          items: [field(`PLUS rate per player / hr (${D.currency})`, number('plusRatePerHour', { decimal: true }))],
+          items: [field(`PLUS rate per player / hr (${currencySign(D.currency)})`, number('plusRatePerHour', { decimal: true }))],
           foot: 'A special rate staff can apply with the PLUS reserve switch when making a booking. It replaces the regular rate for that booking: players × booked hours × PLUS rate. Players never see this option.',
         }));
     }
