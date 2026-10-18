@@ -2579,8 +2579,11 @@
       const s = r.summary;
       const cur = r.currency;
       if (!r.rows.length) {
-        results.replaceChildren(emptyState('chart', 'No bookings match these filters', 'Try a different period, or show all records.',
-          h('button', { type: 'button', class: 'btn btn-tinted', onclick: () => resetFilters(true) }, 'Show All Records')));
+        results.replaceChildren(...[
+          emptyState('chart', 'No bookings match these filters', 'Try a different period, or show all records.',
+            h('button', { type: 'button', class: 'btn btn-tinted', onclick: () => resetFilters(true) }, 'Show All Records')),
+          r.hall && r.hall.count ? hallSection(r) : null,
+        ].filter(Boolean));
         return;
       }
       const tiles = h('div', { class: 'tiles t6' },
@@ -2661,12 +2664,33 @@
               title: g.key === 'walkin' ? walkInChip({ source: 'walkin' }) : (SOURCE_FILTERS.find(([v]) => v === g.key) || [g.key, g.key])[1],
               g,
             })), cur))),
-        h('section', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', { class: 'card-title', text: 'By day of week' })), hbars(dayItems)),
+        // Side by side where there's room; stacked on phones.
+        h('div', { class: 'cols c-1-1' },
+          h('section', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', { class: 'card-title', text: 'By day of week' })), hbars(dayItems)),
+          hallSection(r)),
         h('section', { class: 'group stack', style: { gap: '10px' } },
           h('div', { class: 'filter-summary' },
             h('h2', { class: 'group-title big', style: { padding: '0' }, text: `Booking list (${fmt.num(sorted.length)})` }),
             h('div', { class: 'no-print' }, seg([{ value: 'asc', label: 'Oldest first' }, { value: 'desc', label: 'Newest first' }], F.sort, (v) => { F.sort = v; persist(); load(); }, 'Sort order'))),
           desktop, mobile, more));
+    }
+
+    // SJV Hall payments dated in the report's period (the other filters are about bookings),
+    // as a list that suits every screen size, with the total at the bottom.
+    function hallSection(r) {
+      const hall = r.hall || { payments: [], count: 0, total: 0 };
+      const amount = (n) => h('span', { class: 'num', style: { color: 'var(--label)' }, text: fmt.dollars(n) });
+      return group({
+        title: `SJV Hall payments (${fmt.num(hall.count)})`,
+        aside: h('button', { type: 'button', class: 'btn btn-sm btn-gray no-print', text: 'Manage', onclick: () => openHallPayments() }),
+        items: hall.count
+          ? [
+            ...hall.payments.map((p) => cell({ ic: 'hall', c: 'orange', title: p.paidBy, sub: fmt.dateYear(p.date), value: amount(p.amount) })),
+            cell({ title: h('strong', { text: 'Total' }), value: fmt.dollars(hall.total), strong: true, cls: 'hall-total' }),
+          ]
+          : [cell({ ic: 'hall', c: 'gray', title: 'No payments in this period', sub: 'Record SJV Hall payments with Manage, or in Settings.' })],
+        foot: F.period === 'all' ? 'All SJV Hall payments.' : 'Payments dated in this report’s period. Court, status and other filters apply to bookings only.',
+      });
     }
 
     // Count and value per group. Cancelled bookings carry no booked value; refunds show what was returned.
