@@ -2582,6 +2582,7 @@
         results.replaceChildren(...[
           emptyState('chart', 'No bookings match these filters', 'Try a different period, or show all records.',
             h('button', { type: 'button', class: 'btn btn-tinted', onclick: () => resetFilters(true) }, 'Show All Records')),
+          r.hall && r.hall.count ? h('div', { class: 'tiles t6' }, netIncomeTile(r.summary, cur)) : null,
           r.hall && r.hall.count ? hallSection(r) : null,
         ].filter(Boolean));
         return;
@@ -2592,7 +2593,8 @@
         tile('tag', 'Booked value', fmt.money(s.billed, cur), `Average ${fmt.money(s.averageValue, cur)}`),
         tile('cash', 'Collected', fmt.money(s.collected, cur), s.refunded ? `${fmt.money(s.refunded, cur)} refunded` : 'Paid bookings'),
         tile('alert', 'Outstanding', fmt.money(s.outstanding, cur), 'Unpaid or awaiting check', null, s.outstanding > 0),
-        tile('court', 'Court use', fmt.pct(s.utilization), `${s.days} day${s.days === 1 ? '' : 's'} of opening hours`));
+        tile('court', 'Court use', fmt.pct(s.utilization), `${s.days} day${s.days === 1 ? '' : 's'} of opening hours`),
+        netIncomeTile(s, cur));
 
       const chartBox = h('div');
       const unitLabel = r.series.unit === 'day' ? 'day' : 'month';
@@ -2673,6 +2675,16 @@
             h('h2', { class: 'group-title big', style: { padding: '0' }, text: `Booking list (${fmt.num(sorted.length)})` }),
             h('div', { class: 'no-print' }, seg([{ value: 'asc', label: 'Oldest first' }, { value: 'desc', label: 'Newest first' }], F.sort, (v) => { F.sort = v; persist(); load(); }, 'Sort order'))),
           desktop, mobile, more));
+    }
+
+    // Net Income = Collected − SJV Hall payments, for the current filters. It spans the whole
+    // row of boxes as the bottom line; a loss shows in red.
+    function netIncomeTile(s, cur) {
+      const el = tile('chart', 'Net Income', fmt.money(s.netIncome, cur),
+        `${fmt.money(s.collected, cur)} collected − ${fmt.money(s.hallPaid, cur)} SJV Hall payments`);
+      el.classList.add('tile-wide');
+      if (s.netIncome < 0) el.classList.add('negative');
+      return el;
     }
 
     // SJV Hall payments dated in the report's period (the other filters are about bookings),

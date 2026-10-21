@@ -492,6 +492,9 @@ button.cell:focus-visible, a.cell:focus-visible { outline-offset: -3px; }
 .tile-value { font: 700 clamp(17px, 18cqi, 29px)/1.15 var(--font-round); letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tile-sub { font-size: 13px; color: var(--label-2); }
 .tile.attn .tile-label .ico { color: var(--orange); }
+/* A box across the whole row of boxes, e.g. Reports "Net Income". */
+.tiles > .tile-wide { grid-column: 1 / -1; }
+.tile.negative .tile-value { color: var(--red-text); }
 /* Dashboard: five tiles. Phones: two columns, the last tile full width. Medium: three
    tiles, then two wider ones. Wide: one row of five. Sized from the space the tiles have. */
 .tiles-box { container: tiles / inline-size; }

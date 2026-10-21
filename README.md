@@ -44,6 +44,7 @@ everything from a dashboard. It looks and feels like an iPhone app, and it works
   court, status, payment status, payment method, PLUS reserve, channel (online, walk-in, staff) and text search. Shows totals,
   booked hours, court use, value booked and collected, outstanding money, a by-day/by-month chart, breakdowns by court, status, payment,
   rate, channel and day of week,
+  **Net Income** (money collected minus SJV Hall payments, for the current filters),
   the SJV Hall payments dated in the report period (with their total and a Manage button),
   plus the full booking list with booked hours. **Export to CSV** (opens in Excel or Google Sheets) or **print**.
 - **Settings**:
