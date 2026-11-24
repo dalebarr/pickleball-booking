@@ -470,6 +470,26 @@ button.cell:focus-visible, a.cell:focus-visible { outline-offset: -3px; }
 .chip .ico { width: 12px; height: 12px; color: var(--c, var(--gray)); }
 .chip[data-c="gray"] { --c: var(--gray); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+/* Booking notes: a chip that wraps onto a second line (then "…") instead of one long pill. */
+.chip.note-chip {
+  max-width: 100%; min-width: 0; align-items: flex-start; border-radius: 10px;
+  white-space: normal; font-weight: 500; color: var(--label-2); text-align: left;
+}
+.chip.note-chip .ico { flex: none; margin-top: 2px; color: var(--label-2); }
+.chip.note-chip > span {
+  min-width: 0; overflow: hidden; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+}
+/* Notes saved with the bookings already on a court, in the booking window. */
+.banner-notes { display: grid; gap: 6px; margin-top: 6px; }
+.banner-notes ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.banner-notes li { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; }
+.banner-notes li .ico { flex: none; width: 15px; height: 15px; margin-top: 2px; color: var(--label-2); }
+.banner-notes li span { min-width: 0; overflow-wrap: anywhere; white-space: pre-line; }
+/* A Notes row in a label and value list: long notes wrap and read left to right. */
+.cell.notes-row { align-items: flex-start; }
+.cell.notes-row .cell-value { max-width: 72%; }
+.notes-text { text-align: left; overflow-wrap: anywhere; white-space: pre-line; }
 
 .banner { display: flex; gap: 12px; align-items: flex-start; padding: 13px 16px; border-radius: var(--radius); background: var(--tint-soft); line-height: 1.4; }
 .banner > .ico { color: var(--tint); margin-top: 1px; }

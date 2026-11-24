@@ -77,6 +77,7 @@
     megaphone: '<path d="M4 10v4h3l8 4.5v-13L7 10H4zM18 9.5a3.5 3.5 0 0 1 0 5"/>',
     trash: '<path d="M5 7h14M10 4h4M7 7l1 13h8l1-13M10.5 10.5v6M13.5 10.5v6"/>',
     pencil: '<path d="M5 19l1-4L16 5l3 3L9 18l-4 1zM14 7l3 3"/>',
+    note: '<rect x="5" y="3.5" width="14" height="17" rx="2.5"/><path d="M8.5 8.5h7M8.5 12h7M8.5 15.5h4"/>',
     logout: '<path d="M14 4H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h7M11 12h9M17 9l3 3-3 3"/>',
     people: '<circle cx="9" cy="8.5" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0M16 5.5a3 3 0 0 1 0 6M17.5 14a5 5 0 0 1 3 5"/>',
     court: '<rect x="3" y="6" width="18" height="12" rx="1.5"/><path d="M12 6v12M9 6v12M15 6v12M3 12h6M15 12h6"/>',
@@ -772,14 +773,20 @@
   }
   const playersText = () => (CFG.minPlayers === CFG.maxPlayers ? `${CFG.maxPlayers} players` : `${CFG.minPlayers}–${CFG.maxPlayers} players`);
 
-  /** Bookings and players already on a court: { bookings, players } (blocked time not counted). */
+  /** Bookings, players and notes already on a court: { bookings, players, notes } (blocked time not counted). */
   function bookedOn(items) {
     const booked = items.filter((b) => !isBlockItem(b));
-    return { bookings: booked.length, players: booked.reduce((n, b) => n + (b.players || 0), 0) };
+    return {
+      bookings: booked.length,
+      players: booked.reduce((n, b) => n + (b.players || 0), 0),
+      notes: booked.map((b) => (b.notes || '').trim()).filter(Boolean),
+    };
   }
   /** "6 players booked · 2 bookings" */
   const playersBookedText = (players, bookings) =>
     `${players} player${players === 1 ? '' : 's'} booked · ${bookings} booking${bookings === 1 ? '' : 's'}`;
+  /** A booking's notes as a chip that wraps to two lines at most; the full text shows on hover. */
+  const noteChip = (text) => (text ? h('span', { class: 'chip note-chip', title: text }, icon('note'), h('span', { text })) : null);
 
   /**
    * One row per court for a date, for players (online) and walk-ins.
@@ -792,7 +799,7 @@
     const items = CFG.courts.map((c) => {
       const onCourt = busy.filter((b) => b.court === c.id);
       const blocked = onCourt.some(isBlockItem);
-      const { bookings: booked, players } = bookedOn(onCourt);
+      const { bookings: booked, players, notes } = bookedOn(onCourt);
       let status;
       let tag = null;
       let available = false;
@@ -804,21 +811,25 @@
         status = ['Available', over ? 'this date has passed' : null].filter(Boolean).join(' · ');
       }
       const action = walkIn ? 'Add Walk-in' : 'Book';
-      // Players already booked on this court for the date (the court is shared).
+      // Players already booked on this court for the date (the court is shared),
+      // with each booking's notes beside them.
       const bookedText = booked ? playersBookedText(players, booked) : '';
+      const notesText = notes.length ? ` Notes: ${notes.join('; ')}.` : '';
       return cell({
         ic: 'court', c: !available ? 'gray' : booked ? 'orange' : 'tint',
         title: c.name,
         sub: booked
           ? h('span', { style: { display: 'grid', gap: '6px', justifyItems: 'start' } },
             h('span', { text: `${status} · ${sessionRange(date)}` }),
-            h('span', { class: 'chip', 'data-c': 'orange' }, icon('people'), bookedText))
+            h('span', { class: 'chips' },
+              h('span', { class: 'chip', 'data-c': 'orange' }, icon('people'), bookedText),
+              notes.map(noteChip)))
           : `${status} · ${sessionRange(date)}`,
         right: available
           ? h('span', { class: 'btn btn-sm btn-filled', 'aria-hidden': 'true' }, action)
           : h('span', { class: 'chip', 'data-c': 'gray' }, h('span', { class: 'dot' }), tag),
         onClick: available ? () => onPick(c.id) : null,
-        label: available ? `${c.name}: ${status}${booked ? `, ${bookedText}` : ''}. ${action}` : null,
+        label: available ? `${c.name}: ${status}${booked ? `, ${bookedText}` : ''}.${notesText} ${action}` : null,
       });
     });
     return group({ title: 'Courts', items });
@@ -1235,7 +1246,13 @@
           : `Online bookings are for ${playersText()} per court. The club uses your details to find your booking and to reach you if plans change.`) +
           ' The amount due is number of players × booked hours × rate per hour.',
       }),
-      group({ title: 'Notes', items: [field(null, notes, { stack: true })] }),
+      group({
+        title: 'Notes',
+        items: [field(null, notes, { stack: true })],
+        foot: walkIn
+          ? 'Notes show with the booking on the court list and in the Schedule.'
+          : 'Notes show with your booking on the court list, so other players can see them.',
+      }),
       methods.length
         ? group({
           title: 'Payment',
@@ -1252,14 +1269,20 @@
     function refresh() {
       sessionNote.textContent = `${courtName(S.court)} is reserved for the ${isWeekend(date) ? 'weekend' : 'weekday'} session, ${sessionText(date)}. You pay for the booked hours.`;
       // The court may already have bookings: they share it.
-      const { bookings: shared, players: sharedPlayers } = bookedOn(onCourt(S.court));
+      const { bookings: shared, players: sharedPlayers, notes: sharedNotes } = bookedOn(onCourt(S.court));
       const past = walkIn && !sessionOpen(date);
       const sharedText = `${courtName(S.court)} already has ${sharedPlayers} player${sharedPlayers === 1 ? '' : 's'} booked on this date ` +
         `(${shared} booking${shared > 1 ? 's' : ''}). ` +
         (walkIn ? 'The walk-in will share the court.' : 'You can still book it: the court is shared.');
+      // The notes saved with the bookings already on this court, in full.
+      const notesList = sharedNotes.length
+        ? h('div', { class: 'banner-notes' },
+          h('strong', { text: 'Notes' }),
+          h('ul', null, sharedNotes.map((n) => h('li', null, icon('note'), h('span', { text: n })))))
+        : null;
       shareNote.replaceChildren(...[
         past ? banner('clock', `This date has passed. The walk-in will be recorded for ${fmt.dateLong(date)}.`) : null,
-        shared ? banner('people', sharedText, walkIn ? 'warn' : null) : null,
+        shared ? banner('people', [h('span', { text: sharedText }), notesList], walkIn ? 'warn' : null) : null,
       ].filter(Boolean));
       total.textContent = fmt.money(priceFor(S.hours, S.players, S.plus));
       breakdown.textContent = priceBreakdown(S.hours, S.players, S.plus);
@@ -1388,6 +1411,7 @@
           row('Session', fmt.range(b.start, b.end)),
           row('Court', b.courtName),
           row('Players', String(b.players)),
+          b.notes ? row('Notes', h('span', { class: 'notes-text', text: b.notes }), { cls: 'notes-row' }) : null,
           row('Booked hours', hrsText(b.hours)),
           row('Name', b.name),
           row('Total', fmt.money(b.amount, b.currency), { strong: true, sub: `${b.players} player${b.players === 1 ? '' : 's'} × ${hrsText(b.hours)}` }),
@@ -2057,7 +2081,7 @@
       title: b.type === 'block' ? `${b.name} (blocked)` : b.name,
       sub: h('span', { style: { display: 'grid', gap: '6px' } },
         h('span', { text: [showDate ? fmt.date(b.date) : null, fmt.range(b.start, b.end), courtName(b.court), b.type === 'booking' ? `${b.players} × ${hrsText(b.hours)}` : null, b.type === 'booking' ? b.ref : null].filter(Boolean).join(' · ') }),
-        h('span', { class: 'chips' }, walkInChip(b), plusChip(b), chip(STATUS, b.status), b.type === 'booking' && b.status !== 'cancelled' ? chip(PAY, b.paymentStatus) : null)),
+        h('span', { class: 'chips' }, walkInChip(b), plusChip(b), chip(STATUS, b.status), b.type === 'booking' && b.status !== 'cancelled' ? chip(PAY, b.paymentStatus) : null, noteChip((b.notes || '').trim()))),
       value: b.type === 'booking' ? h('span', { class: 'num', style: { color: 'var(--label)' }, text: fmt.money(b.amount, b.currency) }) : null,
       chevron: true,
       onClick: () => openStaffDetail(b, onChanged),

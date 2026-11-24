@@ -11,7 +11,10 @@ everything from a dashboard. It looks and feels like an iPhone app, and it works
   there are no time slots to choose. Bookings don't lock a court: other players can book the same court and date
   (only courts blocked by the club and closed dates can't be booked).
 - A court that already has bookings shows how many players are booked on it for that date (for example
-  "6 players booked · 2 bookings"). Names are never shown.
+  "6 players booked · 2 bookings"), with each booking's **Notes** beside it. Names are never shown. The booking
+  window lists those notes in full, and the Notes field tells players that other players can see them.
+- **Booking Complete** (and My Bookings) shows the booking's Notes under Players. In the staff **Schedule**, each
+  booking shows its Notes beside its status chips.
 - In their details they enter **Booked hours**: from 1 hour up to the length of that day's session, in half hours.
   The price updates as they choose: **amount due = number of players × booked hours × rate per hour**.
 - Online bookings are for the number of players per court set in Settings (4 to 6 unless you change it).
